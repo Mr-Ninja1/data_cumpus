@@ -4,6 +4,8 @@ import "./globals.css";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import AuthGate from "@/components/AuthGate";
+import PreferenceLauncher from "@/components/PreferenceLauncher";
+import { PreferencesProvider } from "@/hooks/usePreferences";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,16 +30,19 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 dark:bg-gray-950`}>
-        <div className="min-h-screen flex flex-col">
-          <Header />
-          <AuthGate />
-          <div className="flex flex-1">
-            <Sidebar />
-            <main className="flex-1 p-4 md:p-8 bg-gray-50 dark:bg-gray-950">
-              {children}
-            </main>
+        <PreferencesProvider>
+          <div className="min-h-screen flex flex-col">
+            <Header />
+            <AuthGate />
+            <div className="flex flex-1">
+              <Sidebar />
+              <main className="flex-1 p-4 md:p-8 bg-gray-50 dark:bg-gray-950">
+                {children}
+              </main>
+            </div>
+            <PreferenceLauncher />
           </div>
-        </div>
+        </PreferencesProvider>
       </body>
     </html>
   );

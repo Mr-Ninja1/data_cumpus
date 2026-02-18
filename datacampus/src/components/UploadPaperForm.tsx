@@ -44,8 +44,25 @@ export default function UploadPaperForm() {
 
 		return () => sub?.subscription.unsubscribe();
 	}, []);
+
+	// Prefill from local device preferences if available (non-blocking)
+	useEffect(() => {
+		try {
+			const raw = localStorage.getItem('dc:preferences');
+			if (raw) {
+				const p = JSON.parse(raw);
+				if (p?.school && !selectedSchool) setSelectedSchool(p.school);
+				if (p?.program && !selectedProgram) setSelectedProgram(p.program);
+			}
+		} catch (e) {
+			// ignore
+		}
+	}, []);
 	const [selectedSchool, setSelectedSchool] = useState<string>("");
 	const [selectedProgram, setSelectedProgram] = useState<string>("");
+	const [applyToAllPrograms, setApplyToAllPrograms] = useState<boolean>(false);
+	const [applyToMultipleSchools, setApplyToMultipleSchools] = useState<boolean>(false);
+	const [additionalSchools, setAdditionalSchools] = useState<string[]>([]);
 	// year removed — filename will include year
 	const [type, setType] = useState("Exam");
 	const [files, setFiles] = useState<File[] | null>(null);
@@ -56,6 +73,13 @@ export default function UploadPaperForm() {
 	const [lastError, setLastError] = useState<any>(null);
 	const [message, setMessage] = useState<{ type: 'error' | 'info' | 'success'; text: string } | null>(null);
 	const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+	async function hashFileSHA256(file: File) {
+		const buffer = await file.arrayBuffer();
+		const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+		const hashArray = Array.from(new Uint8Array(hashBuffer));
+		return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+	}
 
 	// Helpers to accept folder drops via DataTransferItem.webkitGetAsEntry
 	async function entryToFiles(entry: any): Promise<File[]> {
@@ -144,8 +168,15 @@ export default function UploadPaperForm() {
 		}
 
 		console.log("Upload handler session:", session);
-		if (!selectedSchool || !selectedProgram || !files || files.length === 0) {
-			setMessage({ type: 'error', text: 'Please fill all fields and select at least one PDF.' });
+		// validate selection: require at least one target (single program, apply-to-all, or additional schools)
+		const hasPrimaryTarget = selectedSchool && (applyToAllPrograms || selectedProgram);
+		const hasAdditionalTargets = applyToMultipleSchools && additionalSchools.length > 0;
+		if (!hasPrimaryTarget && !hasAdditionalTargets) {
+			setMessage({ type: 'error', text: 'Please select a target school/program or add other schools.' });
+			return;
+		}
+		if (!files || files.length === 0) {
+			setMessage({ type: 'error', text: 'Please select at least one PDF.' });
 			return;
 		}
 		setLoading(true);
@@ -160,33 +191,95 @@ export default function UploadPaperForm() {
 				console.log("Uploading file:", { fileName, originalName: file.name });
 				// Sanitize filename and path to avoid characters that can cause 400 errors
 				const safeName = file.name.replace(/\s+/g, "_").replace(/,+/g, "-");
-				const storagePath = `${selectedSchool}/${selectedProgram}/${Date.now()}_${safeName}`;
+				// Choose a storage path. If file applies to multiple programs/schools, place under a shared prefix.
+				let storagePrefix = selectedSchool || 'shared';
+				if (applyToAllPrograms || applyToMultipleSchools) storagePrefix = `${storagePrefix}/shared`;
+				const storagePath = `${storagePrefix}/${Date.now()}_${safeName}`;
 				console.log("Storage path:", storagePath);
 				try {
-					// Upload file to Supabase Storage with contentType and no upsert
-					const { data: uploadData, error: uploadError } = await supabase.storage
-						.from("papers")
-						.upload(storagePath, file, { contentType: file.type, upsert: false });
-					if (uploadError) {
-						console.error("Supabase upload error:", uploadError);
-						summary.push({ name: file.name, ok: false, error: uploadError });
-						continue;
+					// Compute content hash and look up or create a `stored_files` record
+					const fileHash = await hashFileSHA256(file);
+					let storedFile: any = null;
+					try {
+						const { data: existingSF } = await supabase.from('stored_files').select('*').eq('file_hash', fileHash).limit(1);
+						if (existingSF && Array.isArray(existingSF) && existingSF.length > 0) storedFile = existingSF[0];
+					} catch (qerr) {
+						console.warn('Error querying stored_files by hash:', qerr);
 					}
-					console.log("Upload response:", uploadData);
-					// store file_path so server can securely fetch the file later
-					const filePath = storagePath;
-					// Insert metadata into Supabase table
-					// note: `file_url` column is NOT NULL in DB schema; store empty string when using private storage and server-side proxy
-					const { data: insertData, error: insertError } = await supabase.from("papers").insert([
-						{
-							school: selectedSchool,
-							program: selectedProgram,
+
+					if (!storedFile) {
+						// Upload file to Supabase Storage with contentType and no upsert
+						const { data: uploadData, error: uploadError } = await supabase.storage
+							.from("papers")
+							.upload(storagePath, file, { contentType: file.type, upsert: false });
+						if (uploadError) {
+							console.error("Supabase upload error:", uploadError);
+							summary.push({ name: file.name, ok: false, error: uploadError });
+							continue;
+						}
+						const filePath = storagePath;
+
+						// Try to create a stored_files row; on conflict, select the existing row
+						try {
+							const { data: ins, error: insErr } = await supabase.from('stored_files').insert({ file_path: filePath, file_hash: fileHash }).select().limit(1);
+							if (insErr) {
+								const { data: sf2 } = await supabase.from('stored_files').select('*').eq('file_hash', fileHash).limit(1);
+								if (sf2 && sf2.length > 0) storedFile = sf2[0];
+								else {
+									console.error('Failed to create or find stored_files row', insErr);
+									summary.push({ name: file.name, ok: false, error: insErr });
+									continue;
+								}
+							} else {
+								storedFile = ins && ins.length ? ins[0] : null;
+							}
+						} catch (serr) {
+							console.error('Error inserting into stored_files:', serr);
+							const { data: sf3 } = await supabase.from('stored_files').select('*').eq('file_hash', fileHash).limit(1);
+							if (sf3 && sf3.length > 0) storedFile = sf3[0];
+						}
+					} else {
+						console.log('Reusing existing stored file for', file.name, storedFile.file_path);
+					}
+					// Build target rows: support apply-to-all-programs and additional schools (insert one metadata row per school/program)
+					const targets = new Set<string>();
+					if (selectedSchool) {
+						if (applyToAllPrograms) {
+							const progs = schools.find(s => s.name === selectedSchool)?.programs || [];
+							for (const p of progs) targets.add(`${selectedSchool}||${p}`);
+						} else if (selectedProgram) {
+							targets.add(`${selectedSchool}||${selectedProgram}`);
+						}
+					}
+					if (applyToMultipleSchools && additionalSchools.length) {
+						for (const sch of additionalSchools) {
+							const progs = schools.find(s => s.name === sch)?.programs || [];
+							for (const p of progs) targets.add(`${sch}||${p}`);
+						}
+					}
+					const inserts: any[] = [];
+					for (const t of Array.from(targets)) {
+						const [sch, prog] = t.split('||');
+						inserts.push({
+							school: sch,
+							program: prog,
 							type,
 							title: fileName,
-							file_path: filePath,
+							file_path: storedFile?.file_path ?? storagePath,
 							file_url: '',
-						},
-					]);
+						});
+					}
+					if (inserts.length === 0) {
+						summary.push({ name: file.name, ok: false, error: 'No target programs selected' });
+						continue;
+					}
+
+					// Attach stored_file_id and file_path to inserts so they reference the stored blob
+					for (const row of inserts) {
+						row.stored_file_id = storedFile?.id ?? null;
+						row.file_path = storedFile?.file_path ?? row.file_path;
+					}
+					const { data: insertData, error: insertError } = await supabase.from("papers").insert(inserts);
 					if (insertError) {
 						console.error('DB insert failed for', file.name, serializeError(insertError));
 						summary.push({ name: file.name, ok: false, error: insertError });
@@ -253,21 +346,47 @@ export default function UploadPaperForm() {
 			</div>
 			<div>
 				<label className="block mb-1 font-medium">Program</label>
-				<select value={selectedProgram} onChange={e => setSelectedProgram(e.target.value)} className="w-full p-2 border rounded bg-[#0f172a] text-white" disabled={!selectedSchool}>
+				<select value={selectedProgram} onChange={e => setSelectedProgram(e.target.value)} className="w-full p-2 border rounded bg-[#0f172a] text-white" disabled={!selectedSchool || applyToAllPrograms}>
 					<option value="">Select Program</option>
 					{programs.map((prog) => (
 						<option key={prog} value={prog}>{prog}</option>
 					))}
 				</select>
 			</div>
+			<div className="flex items-center gap-3">
+				<input id="applyAll" type="checkbox" checked={applyToAllPrograms} onChange={e => setApplyToAllPrograms(e.target.checked)} />
+				<label htmlFor="applyAll" className="text-sm">Apply to all programs in selected school</label>
+			</div>
+			<div className="flex items-center gap-3">
+				<input id="multiSchools" type="checkbox" checked={applyToMultipleSchools} onChange={e => { setApplyToMultipleSchools(e.target.checked); if (!e.target.checked) setAdditionalSchools([]); }} />
+				<label htmlFor="multiSchools" className="text-sm">Also apply to other schools</label>
+			</div>
+			{applyToMultipleSchools && (
+				<div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+					{schools.filter(s => s.name !== selectedSchool).map((s) => (
+						<label key={s.name} className="inline-flex items-center gap-2">
+							<input
+								type="checkbox"
+								checked={additionalSchools.includes(s.name)}
+								onChange={e => {
+									const next = new Set(additionalSchools);
+									if (e.target.checked) next.add(s.name); else next.delete(s.name);
+									setAdditionalSchools(Array.from(next));
+								}}
+							/>
+							<span className="text-sm">{s.name}</span>
+						</label>
+					))}
+				</div>
+			)}
 			<div className="flex gap-4">
 				<div className="flex-1">
 					<label className="block mb-1 font-medium">Type</label>
-					<select value={type} onChange={e => setType(e.target.value)} className="w-full p-2 border rounded bg-[#0f172a] text-white">
-						<option value="Exam">Exam</option>
-						<option value="Test">Test</option>
-						<option value="Other">Other</option>
-					</select>
+									<select value={type} onChange={e => setType(e.target.value)} className="w-full p-2 border rounded bg-[#0f172a] text-white">
+										<option value="Exam">Exam</option>
+										<option value="Test">Test</option>
+										<option value="Material">Material (notes / books)</option>
+									</select>
 				</div>
 			</div>
 			<div className="flex items-center gap-3">
@@ -284,6 +403,7 @@ export default function UploadPaperForm() {
 					>
 						<div className="text-sm text-gray-200">Drop a folder or files here, or use the button to choose.</div>
 						<input
+							key={bulkMode ? 'dir' : 'file'}
 							ref={fileInputRef}
 							type="file"
 							accept="application/pdf"

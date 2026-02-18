@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
+import { usePreferences } from "@/hooks/usePreferences";
 import { Home } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -22,9 +23,29 @@ const categories = [
   },
 ];
 
+const allPrograms = [
+  "BSE",
+  "Cyber Security",
+  "BIT",
+  "BICTE",
+  "Electrical & Electronics",
+  "Telecommunications",
+  "Instrumentation",
+  "Accountancy",
+  "BBA",
+  "Marketing",
+  "Purchasing & Supply",
+];
+
+const programsMap: Record<string, string[]> = {
+  "School of Engineering & Technology": ["Electrical & Electronics", "Telecommunications", "Instrumentation"],
+  "School of Business": ["Accountancy", "BBA", "Marketing", "Purchasing & Supply"],
+  "School of Information & Communication Technology": ["BSE", "Cyber Security", "BIT", "BICTE"],
+};
 export default function Sidebar() {
   const router = useRouter();
   const [open, setOpen] = useState<boolean>(true);
+  const { preferences } = usePreferences();
 
   // On mount, read persisted sidebar state; do this in effect to avoid
   // hydration mismatch between server and client renders.
@@ -82,18 +103,18 @@ export default function Sidebar() {
         </div>
       </div>
       <nav className="mt-4 px-2">
-        {open && categories.map((cat) => (
-          <div key={cat.label} className="mb-4">
-            <div className="px-4 text-xs text-gray-500 uppercase mb-2">{cat.label}</div>
+        {open && (
+          <div className="mb-4">
+            <div className="px-4 text-xs text-gray-500 uppercase mb-2">All Programs</div>
             <ul>
-              {cat.children.map((prog) => (
+              {(preferences?.school ? (programsMap[preferences.school] || []) : allPrograms).map((prog) => (
                 <li key={prog} className="px-6 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded cursor-pointer text-sm">
                   {prog}
                 </li>
               ))}
             </ul>
           </div>
-        ))}
+        )}
       </nav>
     </aside>
   );

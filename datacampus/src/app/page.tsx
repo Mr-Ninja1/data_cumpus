@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "@/utils/supabaseClient";
 import PaperCard from "@/components/PaperCard";
 import PaperFilters from "@/components/PaperFilters";
+import { usePreferences } from "@/hooks/usePreferences";
 
 interface Paper {
   id: string;
@@ -20,8 +21,16 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [selectedSchool, setSelectedSchool] = useState("");
   const [selectedProgram, setSelectedProgram] = useState("");
+  const [selectedType, setSelectedType] = useState("");
+  const { preferences } = usePreferences();
 
   useEffect(() => {
+    // Apply preferences from context when available
+    if (preferences) {
+      if (preferences.school) setSelectedSchool(preferences.school);
+      if (preferences.program) setSelectedProgram(preferences.program);
+    }
+
     const fetchPapers = async () => {
       setLoading(true);
       const { data, error } = await supabase
@@ -51,23 +60,39 @@ export default function HomePage() {
     fetchPapers();
   }, []);
 
+  // Keep local filters in sync when preferences change
+  useEffect(() => {
+    if (preferences) {
+      if (preferences.school) setSelectedSchool(preferences.school);
+      if (preferences.program) setSelectedProgram(preferences.program);
+    }
+  }, [preferences]);
+
   // Filter papers by school and program
   const filteredPapers = papers.filter((paper) => {
     if (selectedSchool && paper.school !== selectedSchool) return false;
     if (selectedProgram && paper.program !== selectedProgram) return false;
+    if (selectedType && paper.type !== selectedType) return false;
     return true;
   });
 
   return (
     <div className="flex min-h-screen flex-col items-start bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex w-full max-w-6xl flex-col items-start py-12 px-4 bg-white dark:bg-black">
-        <h1 className="text-2xl font-bold mb-4">Recent Papers</h1>
-        <PaperFilters
-          selectedSchool={selectedSchool}
-          setSelectedSchool={setSelectedSchool}
-          selectedProgram={selectedProgram}
-          setSelectedProgram={setSelectedProgram}
-        />
+      <main className="flex w-full max-w-6xl flex-col items-start pt-0 px-4 bg-white dark:bg-black">
+        <div className="w-full flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">Recent</h1>
+          <div className="ml-4">
+            <PaperFilters
+              selectedSchool={selectedSchool}
+              setSelectedSchool={setSelectedSchool}
+              selectedProgram={selectedProgram}
+              setSelectedProgram={setSelectedProgram}
+              selectedType={selectedType}
+              setSelectedType={setSelectedType}
+              inlineChips
+            />
+          </div>
+        </div>
         {loading ? (
           <div>Loading...</div>
         ) : (
