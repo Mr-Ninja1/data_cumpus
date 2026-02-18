@@ -1,3 +1,5 @@
+"use client";
+
 import UploadPaperForm from "@/components/UploadPaperForm";
 
 export default function UploadPage() {
