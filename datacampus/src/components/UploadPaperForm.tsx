@@ -2,6 +2,9 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/utils/supabaseClient";
 import Auth from "./Auth";
+import { Upload, FileText, X, Check, AlertCircle, ChevronDown } from "lucide-react";
+import { showToast } from "@/utils/toast";
+import { useProfile } from "@/hooks/useProfile";
 
 const schools = [
 	{
@@ -29,6 +32,7 @@ const schools = [
 
 export default function UploadPaperForm() {
 	const [session, setSession] = useState<any>(null);
+	const { isTrusted } = useProfile();
 
 	useEffect(() => {
 		let mounted = true;
@@ -45,19 +49,20 @@ export default function UploadPaperForm() {
 		return () => sub?.subscription.unsubscribe();
 	}, []);
 
-	// Prefill from local device preferences if available (non-blocking)
-	useEffect(() => {
-		try {
-			const raw = localStorage.getItem('dc:preferences');
-			if (raw) {
-				const p = JSON.parse(raw);
-				if (p?.school && !selectedSchool) setSelectedSchool(p.school);
-				if (p?.program && !selectedProgram) setSelectedProgram(p.program);
-			}
-		} catch (e) {
-			// ignore
-		}
-	}, []);
+  // Prefill from preferences context
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('dc:preferences');
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p?.school && !selectedSchool) setSelectedSchool(p.school);
+        if (p?.program && !selectedProgram) setSelectedProgram(p.program);
+      }
+    } catch (e) {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 	const [selectedSchool, setSelectedSchool] = useState<string>("");
 	const [selectedProgram, setSelectedProgram] = useState<string>("");
 	const [applyToAllPrograms, setApplyToAllPrograms] = useState<boolean>(false);
@@ -69,9 +74,11 @@ export default function UploadPaperForm() {
 	const [loading, setLoading] = useState(false);
 	const [success, setSuccess] = useState(false);
 	const [bulkMode, setBulkMode] = useState(false);
-	const [results, setResults] = useState<Array<{ name: string; ok: boolean; error?: any }>>([]);
+	const [results, setResults] = useState<Array<{ name: string; ok: boolean; error?: any; queued?: boolean }>>([]);
 	const [lastError, setLastError] = useState<any>(null);
 	const [message, setMessage] = useState<{ type: 'error' | 'info' | 'success'; text: string } | null>(null);
+	const [uploadProgress, setUploadProgress] = useState<number>(0);
+	const [dragActive, setDragActive] = useState(false);
 	const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
 	async function hashFileSHA256(file: File) {
@@ -127,10 +134,17 @@ export default function UploadPaperForm() {
 
 	function onDragOver(e: React.DragEvent) {
 		e.preventDefault();
+		setDragActive(true);
+	}
+
+	function onDragLeave(e: React.DragEvent) {
+		e.preventDefault();
+		setDragActive(false);
 	}
 
 	async function onDrop(e: React.DragEvent) {
 		e.preventDefault();
+		setDragActive(false);
 		setMessage(null);
 		const filesFromDrop = await itemsToFiles(e.dataTransfer?.items ?? null);
 		if (filesFromDrop.length) {
@@ -140,6 +154,12 @@ export default function UploadPaperForm() {
 			setFiles(Array.from(e.dataTransfer?.files || []));
 		}
 	}
+
+	const removeFile = (index: number) => {
+		if (files) {
+			setFiles(files.filter((_, i) => i !== index));
+		}
+	};
 
 	function serializeError(err: any) {
 		if (!err) return null;
@@ -164,6 +184,7 @@ export default function UploadPaperForm() {
 		e.preventDefault();
 		if (!session) {
 			setMessage({ type: 'error', text: 'Please sign in before uploading.' });
+			showToast('error', 'Please sign in before uploading.');
 			return;
 		}
 
@@ -173,19 +194,23 @@ export default function UploadPaperForm() {
 		const hasAdditionalTargets = applyToMultipleSchools && additionalSchools.length > 0;
 		if (!hasPrimaryTarget && !hasAdditionalTargets) {
 			setMessage({ type: 'error', text: 'Please select a target school/program or add other schools.' });
+			showToast('error', 'Please select a target school/program.');
 			return;
 		}
 		if (!files || files.length === 0) {
 			setMessage({ type: 'error', text: 'Please select at least one PDF.' });
+			showToast('error', 'Please select at least one PDF.');
 			return;
 		}
 		setLoading(true);
 		setSuccess(false);
 		setResults([]);
-		const summary: Array<{ name: string; ok: boolean; error?: any }> = [];
+		setUploadProgress(0);
+		const summary: Array<{ name: string; ok: boolean; error?: any; queued?: boolean }> = [];
 		try {
 			const list = Array.from(files || []);
 			for (let i = 0; i < list.length; i++) {
+				setUploadProgress(Math.round(((i + 1) / list.length) * 100));
 				const file = list[i];
 				const fileName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
 				console.log("Uploading file:", { fileName, originalName: file.name });
@@ -258,6 +283,7 @@ export default function UploadPaperForm() {
 						}
 					}
 					const inserts: any[] = [];
+					const uploaderId = session.user?.id;
 					for (const t of Array.from(targets)) {
 						const [sch, prog] = t.split('||');
 						inserts.push({
@@ -267,6 +293,8 @@ export default function UploadPaperForm() {
 							title: fileName,
 							file_path: storedFile?.file_path ?? storagePath,
 							file_url: '',
+							stored_file_id: storedFile?.id ?? null,
+							uploader_id: uploaderId,
 						});
 					}
 					if (inserts.length === 0) {
@@ -274,19 +302,44 @@ export default function UploadPaperForm() {
 						continue;
 					}
 
-					// Attach stored_file_id and file_path to inserts so they reference the stored blob
-					for (const row of inserts) {
-						row.stored_file_id = storedFile?.id ?? null;
-						row.file_path = storedFile?.file_path ?? row.file_path;
+					// Trusted contributors publish live; others go to moderation queue
+					let insertError: any = null;
+					let pendingErr: any = null;
+					if (isTrusted) {
+						const liveInserts = inserts.map(({ uploader_id, ...rest }) => ({
+							...rest,
+							uploaded_by: uploader_id,
+						}));
+						const { error: liveErr } = await supabase.from("papers").insert(liveInserts);
+						if (liveErr) {
+							const bare = liveInserts.map(({ uploaded_by, ...rest }) => rest);
+							const { error: bareErr } = await supabase.from("papers").insert(bare);
+							insertError = bareErr || liveErr;
+						}
+					} else {
+						const { error: pErr } = await supabase.from("pending_papers").insert(inserts);
+						pendingErr = pErr;
+						if (pendingErr) {
+							console.warn("pending_papers insert failed, falling back to papers:", pendingErr.message);
+							const liveInserts = inserts.map(({ uploader_id, ...rest }) => ({
+								...rest,
+								uploaded_by: uploader_id,
+							}));
+							const { error: liveErr } = await supabase.from("papers").insert(liveInserts);
+							if (liveErr) {
+								const bare = liveInserts.map(({ uploaded_by, ...rest }) => rest);
+								const { error: bareErr } = await supabase.from("papers").insert(bare);
+								insertError = bareErr || liveErr;
+							}
+						}
 					}
-					const { data: insertData, error: insertError } = await supabase.from("papers").insert(inserts);
 					if (insertError) {
 						console.error('DB insert failed for', file.name, serializeError(insertError));
 						summary.push({ name: file.name, ok: false, error: insertError });
 						continue;
 					}
 					// success for this file
-					summary.push({ name: file.name, ok: true });
+					summary.push({ name: file.name, ok: true, queued: !isTrusted && !pendingErr });
 				} catch (perr) {
 					console.error('Error uploading/inserting', file.name, perr);
 					summary.push({ name: file.name, ok: false, error: perr });
@@ -294,13 +347,28 @@ export default function UploadPaperForm() {
 			}
 			setResults(summary);
 			const anySuccess = summary.some(r => r.ok);
-			if (anySuccess) setSuccess(true);
+			const failCount = summary.filter(r => !r.ok).length;
+			const queuedCount = summary.filter((r: any) => r.ok && r.queued).length;
+			if (anySuccess) {
+				setSuccess(true);
+				if (queuedCount > 0 && queuedCount === summary.filter(r => r.ok).length) {
+					showToast('success', 'Submitted for review — it will go live after approval');
+				} else if (failCount) {
+					showToast('success', `Uploaded with ${failCount} failure${failCount === 1 ? '' : 's'}`);
+				} else {
+					showToast('success', `Uploaded ${summary.filter(r => r.ok).length} file${summary.filter(r => r.ok).length === 1 ? '' : 's'}`);
+				}
+			} else {
+				showToast('error', 'Upload failed for all files');
+			}
 			// Reset form fields (leave others so user can re-run with same metadata if needed)
 			setFiles(null);
+			setUploadProgress(100);
 		} catch (err: any) {
 			console.error("Upload handler error:", err);
 			setLastError(err);
 			setMessage({ type: 'error', text: 'Upload failed: ' + (err?.message || JSON.stringify(err)) });
+			showToast('error', 'Upload failed: ' + (err?.message || 'Unknown error'));
 		}
 		setLoading(false);
 	};
@@ -316,135 +384,221 @@ export default function UploadPaperForm() {
 	}
 
 	return (
-		<form className="max-w-xl mx-auto bg-white dark:bg-gray-900 p-6 rounded-lg shadow space-y-4" onSubmit={handleSubmit}>
-			<h2 className="text-xl font-bold mb-2">Upload Past Paper</h2>
-			{loading && (
-				<div className="flex justify-center items-center mb-2">
-					<svg className="animate-spin h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-						<circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-						<path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-					</svg>
-					<span className="ml-2 text-blue-500">Uploading...</span>
+		<form className="max-w-2xl mx-auto bg-white dark:bg-gray-900 p-6 md:p-8 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-800 space-y-6" onSubmit={handleSubmit}>
+				<div className="flex items-center gap-3 mb-6">
+					<div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl">
+						<Upload className="text-indigo-600 dark:text-indigo-400 w-6 h-6" />
+					</div>
+					<div>
+						<h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Upload Past Paper</h2>
+						<p className="text-sm text-gray-500 dark:text-gray-400">Submissions go to review before going live</p>
+					</div>
 				</div>
-			)}
-			{success && (
-				<div className="text-green-500 font-semibold mb-2">Upload successful!</div>
-			)}
-			{message && (
-				<div className={`${message.type === 'error' ? 'bg-red-600 text-white' : message.type === 'success' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'} p-3 rounded mb-2`} role="status">
-					{message.text}
+
+				{loading && (
+					<div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl p-4">
+						<div className="flex items-center justify-between mb-2">
+							<span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">Uploading files...</span>
+							<span className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">{uploadProgress}%</span>
+						</div>
+						<div className="w-full bg-indigo-200 dark:bg-indigo-800 rounded-full h-2 overflow-hidden">
+							<div className="bg-indigo-600 dark:bg-indigo-400 h-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+						</div>
+					</div>
+				)}
+
+				{success && (
+					<div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 flex items-center gap-3">
+						<div className="p-2 bg-emerald-100 dark:bg-emerald-900/30 rounded-full">
+							<Check className="text-emerald-600 dark:text-emerald-400 w-5 h-5" />
+						</div>
+						<div>
+							<p className="font-semibold text-emerald-700 dark:text-emerald-300">Upload successful!</p>
+							<p className="text-sm text-emerald-600 dark:text-emerald-400">Your papers have been uploaded.</p>
+						</div>
+					</div>
+				)}
+
+				{message && (
+					<div className={`${message.type === 'error' ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300' : message.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'} border rounded-xl p-4 flex items-center gap-3`} role="status">
+						{message.type === 'error' && <AlertCircle className="w-5 h-5 flex-shrink-0" />}
+						<p className="font-medium">{message.text}</p>
+					</div>
+				)}
+
+				<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+					<div>
+						<label className="block mb-2 font-medium text-gray-700 dark:text-gray-300">School</label>
+						<select value={selectedSchool} onChange={handleSchoolChange} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
+							<option value="">Select School</option>
+							{schools.map((school) => (
+								<option key={school.name} value={school.name}>{school.name}</option>
+							))}
+						</select>
+					</div>
+					<div>
+						<label className="block mb-2 font-medium text-gray-700 dark:text-gray-300">Program</label>
+						<select value={selectedProgram} onChange={e => setSelectedProgram(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed" disabled={!selectedSchool || applyToAllPrograms}>
+							<option value="">Select Program</option>
+							{programs.map((prog) => (
+								<option key={prog} value={prog}>{prog}</option>
+							))}
+						</select>
+					</div>
 				</div>
-			)}
-			<div>
-				<label className="block mb-1 font-medium">School</label>
-				<select value={selectedSchool} onChange={handleSchoolChange} className="w-full p-2 border rounded bg-[#0f172a] text-white">
-					<option value="">Select School</option>
-					{schools.map((school) => (
-						<option key={school.name} value={school.name}>{school.name}</option>
-					))}
-				</select>
-			</div>
-			<div>
-				<label className="block mb-1 font-medium">Program</label>
-				<select value={selectedProgram} onChange={e => setSelectedProgram(e.target.value)} className="w-full p-2 border rounded bg-[#0f172a] text-white" disabled={!selectedSchool || applyToAllPrograms}>
-					<option value="">Select Program</option>
-					{programs.map((prog) => (
-						<option key={prog} value={prog}>{prog}</option>
-					))}
-				</select>
-			</div>
-			<div className="flex items-center gap-3">
-				<input id="applyAll" type="checkbox" checked={applyToAllPrograms} onChange={e => setApplyToAllPrograms(e.target.checked)} />
-				<label htmlFor="applyAll" className="text-sm">Apply to all programs in selected school</label>
-			</div>
-			<div className="flex items-center gap-3">
-				<input id="multiSchools" type="checkbox" checked={applyToMultipleSchools} onChange={e => { setApplyToMultipleSchools(e.target.checked); if (!e.target.checked) setAdditionalSchools([]); }} />
-				<label htmlFor="multiSchools" className="text-sm">Also apply to other schools</label>
-			</div>
-			{applyToMultipleSchools && (
-				<div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-					{schools.filter(s => s.name !== selectedSchool).map((s) => (
-						<label key={s.name} className="inline-flex items-center gap-2">
-							<input
-								type="checkbox"
-								checked={additionalSchools.includes(s.name)}
-								onChange={e => {
-									const next = new Set(additionalSchools);
-									if (e.target.checked) next.add(s.name); else next.delete(s.name);
-									setAdditionalSchools(Array.from(next));
-								}}
-							/>
-							<span className="text-sm">{s.name}</span>
-						</label>
-					))}
+
+				<div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+					<input id="applyAll" type="checkbox" checked={applyToAllPrograms} onChange={e => setApplyToAllPrograms(e.target.checked)} className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500 focus:ring-offset-0" />
+					<label htmlFor="applyAll" className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer">Apply to all programs in selected school</label>
 				</div>
-			)}
-			<div className="flex gap-4">
-				<div className="flex-1">
-					<label className="block mb-1 font-medium">Type</label>
-									<select value={type} onChange={e => setType(e.target.value)} className="w-full p-2 border rounded bg-[#0f172a] text-white">
-										<option value="Exam">Exam</option>
-										<option value="Test">Test</option>
-										<option value="Material">Material (notes / books)</option>
-									</select>
+
+				<div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+					<input id="multiSchools" type="checkbox" checked={applyToMultipleSchools} onChange={e => { setApplyToMultipleSchools(e.target.checked); if (!e.target.checked) setAdditionalSchools([]); }} className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500 focus:ring-offset-0" />
+					<label htmlFor="multiSchools" className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer">Also apply to other schools</label>
 				</div>
-			</div>
-			<div className="flex items-center gap-3">
-				<input id="bulkMode" type="checkbox" checked={bulkMode} onChange={e => setBulkMode(e.target.checked)} />
-				<label htmlFor="bulkMode" className="text-sm">Bulk upload (select folder)</label>
-			</div>
-			<div>
-				<label className="block mb-1 font-medium">Upload PDF(s)</label>
-				<div className="flex gap-2 items-start">
+
+				{applyToMultipleSchools && (
+					<div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-2">
+						<p className="text-sm font-medium text-gray-700 dark:text-gray-300">Select additional schools:</p>
+						<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+							{schools.filter(s => s.name !== selectedSchool).map((s) => (
+								<label key={s.name} className="flex items-center gap-3 p-3 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-600 transition-colors">
+									<input
+										type="checkbox"
+										checked={additionalSchools.includes(s.name)}
+										onChange={e => {
+											const next = new Set(additionalSchools);
+											if (e.target.checked) next.add(s.name); else next.delete(s.name);
+											setAdditionalSchools(Array.from(next));
+										}}
+										className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500 focus:ring-offset-0"
+									/>
+									<span className="text-sm text-gray-700 dark:text-gray-300">{s.name}</span>
+								</label>
+							))}
+						</div>
+					</div>
+				)}
+
+				<div>
+					<label className="block mb-2 font-medium text-gray-700 dark:text-gray-300">Type</label>
+					<select value={type} onChange={e => setType(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
+						<option value="Exam">Exam</option>
+						<option value="Test">Test</option>
+						<option value="Material">Material (notes / books)</option>
+					</select>
+				</div>
+
+				<div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+					<input id="bulkMode" type="checkbox" checked={bulkMode} onChange={e => setBulkMode(e.target.checked)} className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500 focus:ring-offset-0" />
+					<label htmlFor="bulkMode" className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer">Bulk upload (select folder)</label>
+				</div>
+
+				<div>
+					<label className="block mb-2 font-medium text-gray-700 dark:text-gray-300">Upload PDF(s)</label>
 					<div
-						className="flex-1 border-dashed border-2 border-gray-600 p-4 rounded bg-[#07102a]"
+						className={`relative border-2 border-dashed rounded-xl p-8 transition-all ${
+							dragActive ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-300 dark:border-gray-600 hover:border-indigo-400 dark:hover:border-indigo-500'
+						}`}
 						onDragOver={onDragOver}
+						onDragLeave={onDragLeave}
 						onDrop={onDrop}
 					>
-						<div className="text-sm text-gray-200">Drop a folder or files here, or use the button to choose.</div>
-						<input
-							key={bulkMode ? 'dir' : 'file'}
-							ref={fileInputRef}
-							type="file"
-							accept="application/pdf"
-							multiple
-							onChange={e => setFiles(Array.from(e.target.files || []))}
-							className="w-full bg-[#0f172a] text-white mt-2"
-							{...(bulkMode ? ({ webkitdirectory: 'true', directory: 'true' } as any) : {})}
-						/>
-					</div>
-					<div className="flex flex-col gap-2">
-						{bulkMode && (
-							<button type="button" className="px-3 py-1 bg-gray-700 text-white rounded text-sm" onClick={() => fileInputRef.current?.click()}>
-								Select folder
+						<div className="flex flex-col items-center justify-center space-y-4">
+							<div className="p-4 bg-indigo-100 dark:bg-indigo-900/30 rounded-full">
+								<Upload className="text-indigo-600 dark:text-indigo-400 w-8 h-8" />
+							</div>
+							<div className="text-center">
+								<p className="text-gray-700 dark:text-gray-300 font-medium">Drop files or folders here</p>
+								<p className="text-sm text-gray-500 dark:text-gray-400">or click to browse</p>
+							</div>
+							<input
+								key={bulkMode ? 'dir' : 'file'}
+								ref={fileInputRef}
+								type="file"
+								accept="application/pdf"
+								multiple
+								onChange={e => setFiles(Array.from(e.target.files || []))}
+								className="hidden"
+								{...(bulkMode ? ({ webkitdirectory: 'true', directory: 'true' } as any) : {})}
+							/>
+							<button type="button" onClick={() => fileInputRef.current?.click()} className="px-6 py-2 bg-indigo-600 dark:bg-indigo-500 text-white rounded-lg font-medium hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors">
+								Choose files
 							</button>
-						)}
-						<button type="button" className="px-3 py-1 bg-gray-700 text-white rounded text-sm" onClick={() => fileInputRef.current?.click()}>
-							Choose files
-						</button>
+						</div>
 					</div>
+
+					{files && files.length > 0 && (
+						<div className="mt-4 space-y-2">
+							<p className="text-sm font-medium text-gray-700 dark:text-gray-300">Selected files ({files.length})</p>
+							<div className="max-h-48 overflow-y-auto space-y-2">
+								{files.map((file, index) => (
+									<div key={index} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+										<FileText className="text-gray-400 w-5 h-5 flex-shrink-0" />
+										<span className="flex-1 text-sm text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
+										<span className="text-xs text-gray-500 dark:text-gray-400">{(file.size / 1024).toFixed(1)} KB</span>
+										<button
+											type="button"
+											onClick={() => removeFile(index)}
+											className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors"
+										>
+											<X size={16} className="text-red-500" />
+										</button>
+									</div>
+								))}
+							</div>
+						</div>
+					)}
 				</div>
-				{bulkMode && (
-					<div className="text-xs text-gray-400 mt-1">Drop a folder here or use the "Select folder" button. Folder selection/popups are browser-handled; use drag-and-drop for the smoothest experience.</div>
+
+				<button type="submit" disabled={loading} className="w-full py-4 bg-indigo-600 dark:bg-indigo-500 text-white rounded-xl font-semibold hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+					{loading ? (
+						<>
+							<svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+								<circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+								<path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+							</svg>
+							<span>Uploading...</span>
+						</>
+					) : (
+						<>
+							<Upload size={20} />
+							<span>Upload Paper</span>
+						</>
+					)}
+				</button>
+
+				{lastError && (
+					<div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+						<div className="flex items-center gap-2 mb-2">
+							<AlertCircle className="text-red-600 dark:text-red-400 w-5 h-5" />
+							<span className="font-semibold text-red-700 dark:text-red-300">Error Details</span>
+						</div>
+						<pre className="text-xs text-red-600 dark:text-red-400 overflow-auto max-h-40">{JSON.stringify(serializeError(lastError), null, 2)}</pre>
+					</div>
 				)}
-			</div>
-			<button type="submit" className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition">Upload</button>
-			{lastError && (
-				<pre className="mt-4 p-3 bg-red-900 text-white text-sm overflow-auto">{JSON.stringify(serializeError(lastError), null, 2)}</pre>
-			)}
-			{results.length > 0 && (
-				<div className="mt-4">
-					<div className="font-semibold">Upload results</div>
-					<div className="text-sm text-gray-400">{results.filter(r => r.ok).length} succeeded — {results.filter(r => !r.ok).length} failed</div>
-					<ul className="mt-2 text-sm list-disc list-inside max-h-40 overflow-auto">
-						{results.map((r) => (
-							<li key={r.name} className={r.ok ? 'text-green-500' : 'text-red-400'}>
-								{r.name}{!r.ok && r.error ? ` — ${String(r.error?.message || r.error)}` : ''}
-							</li>
-						))}
-					</ul>
-				</div>
-			)}
-		</form>
-	);
+
+				{results.length > 0 && (
+					<div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
+						<div className="flex items-center justify-between mb-3">
+							<span className="font-semibold text-gray-900 dark:text-gray-100">Upload Results</span>
+							<span className="text-sm text-gray-500 dark:text-gray-400">{results.filter(r => r.ok).length} succeeded — {results.filter(r => !r.ok).length} failed</span>
+						</div>
+						<ul className="space-y-2 max-h-40 overflow-auto">
+							{results.map((r) => (
+								<li key={r.name} className={`flex items-center gap-2 p-2 rounded-lg ${r.ok ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+									{r.ok ? (
+										<Check className="text-emerald-600 dark:text-emerald-400 w-4 h-4 flex-shrink-0" />
+									) : (
+										<AlertCircle className="text-red-600 dark:text-red-400 w-4 h-4 flex-shrink-0" />
+									)}
+									<span className={`text-sm ${r.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>{r.name}</span>
+									{!r.ok && r.error && <span className="text-xs text-red-500 dark:text-red-400 ml-auto truncate max-w-xs">— {String(r.error?.message || r.error)}</span>}
+								</li>
+							))}
+						</ul>
+					</div>
+				)}
+			</form>
+		);
 }

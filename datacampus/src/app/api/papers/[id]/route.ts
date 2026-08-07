@@ -6,6 +6,11 @@ export const runtime = 'nodejs';
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
+    if (!supabaseServer) {
+      console.error('supabaseServer not initialized - missing SUPABASE_SERVICE_ROLE_KEY');
+      return new NextResponse('Server misconfiguration: missing SUPABASE_SERVICE_ROLE_KEY', { status: 500 });
+    }
+
     // select all columns to avoid errors when older rows don't have `file_path`
     const { data: paper, error } = await supabaseServer.from('papers').select('*').eq('id', id).limit(1).single();
     if (error) {
@@ -15,12 +20,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     if (!paper) {
       console.warn('Paper not found', { id });
       return new NextResponse('paper not found', { status: 404 });
-    }
-
-    // Ensure server client exists
-    if (!supabaseServer) {
-      console.error('supabaseServer not initialized - missing SUPABASE_SERVICE_ROLE_KEY');
-      return new NextResponse('Server misconfiguration: missing SUPABASE_SERVICE_ROLE_KEY', { status: 500 });
     }
 
     // Prefer stored file_path (the storage path saved at upload). If missing, fall back to file_url.

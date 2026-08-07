@@ -98,7 +98,12 @@ export default function PdfViewer({ fileUrl, scale = 1 }: Props) {
           </button>
         </div>
 
-        <Document file={fileUrl} onLoadSuccess={onDocumentLoadSuccess} loading={<div>Loading document...</div>}>
+        <Document
+          // react-pdf File typings are stricter than runtime; string/blob URL is the common case
+          file={fileUrl as string}
+          onLoadSuccess={onDocumentLoadSuccess}
+          loading={<div>Loading document...</div>}
+        >
           {Array.from(new Array(numPages || 0), (_el, index) => (
             <div key={`page_${index + 1}`} className="mb-4 w-full flex justify-start">
               <Page

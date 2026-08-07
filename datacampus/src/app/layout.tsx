@@ -1,20 +1,20 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
-import AuthGate from "@/components/AuthGate";
-import PreferenceLauncher from "@/components/PreferenceLauncher";
+import Toast from "@/components/Toast";
+import MobileTabBar from "@/components/MobileTabBar";
+import ClientExtras from "@/components/ClientExtras";
+import SiteBanner from "@/components/SiteBanner";
 import { PreferencesProvider } from "@/hooks/usePreferences";
+import { LibraryProvider } from "@/hooks/useLibrary";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -29,19 +29,25 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 dark:bg-gray-950`}>
+      <body className={`${inter.variable} font-sans antialiased bg-white dark:bg-gray-950 md:bg-gray-50 md:dark:bg-gray-950`}>
         <PreferencesProvider>
-          <div className="min-h-screen flex flex-col">
-            <Header />
-            <AuthGate />
-            <div className="flex flex-1">
-              <Sidebar />
-              <main className="flex-1 p-4 md:p-8 bg-gray-50 dark:bg-gray-950">
-                {children}
-              </main>
+          <LibraryProvider>
+            <div className="min-h-screen flex flex-col">
+              <Header />
+              <div className="flex flex-1">
+                <Sidebar />
+                <main className="flex-1 w-full bg-white dark:bg-gray-950 md:bg-gray-50 md:dark:bg-gray-950">
+                  <div className="w-full max-w-7xl mx-auto px-3 md:px-8 pt-0 md:pt-6 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-8">
+                    <SiteBanner />
+                    {children}
+                  </div>
+                </main>
+              </div>
             </div>
-            <PreferenceLauncher />
-          </div>
+            <Toast />
+            <MobileTabBar />
+            <ClientExtras />
+          </LibraryProvider>
         </PreferencesProvider>
       </body>
     </html>

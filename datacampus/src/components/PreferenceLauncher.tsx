@@ -1,18 +1,19 @@
 "use client";
-import React, { useEffect, useState, useRef } from "react";
-import PreferenceModal from "./PreferenceModal";
+import React, { useEffect, useState } from "react";
 import Auth from "./Auth";
 import { supabase } from "@/utils/supabaseClient";
+import ModalPortal from "./ModalPortal";
 
-export default function PreferenceLauncher() {
-  const [showPref, setShowPref] = useState(false);
+export default function PreferenceLauncher({
+  onDismiss,
+}: {
+  onDismiss?: () => void;
+}) {
   const [showPrompt, setShowPrompt] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
-  const intervalRefRef = useRef<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    const intervalRef = intervalRefRef.current;
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (!mounted) return;
@@ -23,93 +24,89 @@ export default function PreferenceLauncher() {
       // Show prompt only when there are no local prefs and no account prefs
       if (!hasLocal && !hasAccountPrefs) {
         setShowPrompt(true);
-        // schedule showing the preference modal every 1 minute until prefs exist
-        if (!intervalRefRef.current) {
-          intervalRefRef.current = window.setInterval(() => {
-            try {
-              const hasLocalNow = Boolean(localStorage.getItem("dc:preferences"));
-              if (!hasLocalNow) setShowPref(true);
-            } catch (e) {
-              // ignore
-            }
-          }, 60 * 1000);
-        }
+      } else {
+        onDismiss?.();
       }
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange((_ev, s) => {
-      const session = s ?? null;
-      const hasAccountPrefs = Boolean(session?.user?.user_metadata?.preferences);
-      if (hasAccountPrefs) {
-        // stop re-prompting
-        if (intervalRefRef.current) {
-          clearInterval(intervalRefRef.current as number);
-          intervalRefRef.current = null;
-        }
+      if (s) {
         setShowPrompt(false);
-        setShowPref(false);
+        setShowAuth(false);
+        onDismiss?.();
       }
     });
 
     return () => {
       mounted = false;
       sub?.subscription.unsubscribe();
-      if (intervalRefRef.current) {
-        clearInterval(intervalRefRef.current as number);
-        intervalRefRef.current = null;
-      }
     };
-  }, []);
+  }, [onDismiss]);
 
   // Called when user chooses "continue without login" from prompt
   const onContinueWithoutLogin = () => {
     setShowPrompt(false);
-    setShowPref(true);
-  };
-
-  // Called after PreferenceModal saves locally
-  const handleSavedLocal = () => {
-    // stop the periodic re-open since preferences now exist locally
-    if (intervalRefRef.current) {
-      clearInterval(intervalRefRef.current as number);
-      intervalRefRef.current = null;
-    }
-    // show the login prompt so user can optionally sign in to persist
-    setShowPrompt(true);
+    onDismiss?.();
   };
 
   return (
     <>
       {/* Sign-in prompt shown before preferences */}
       {showPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md bg-white dark:bg-gray-900 p-6 rounded shadow text-center">
-            <h3 className="text-lg font-semibold mb-2">Welcome — personalize your experience</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">Sign in to save your preferences to your account, or continue without signing in.</p>
-            <div className="flex gap-3 justify-center">
-              <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={() => { setShowAuth(true); setShowPrompt(false); }}>Sign in</button>
-              <button className="px-4 py-2 bg-gray-200 text-gray-900 rounded border border-gray-300 hover:bg-gray-100 dark:bg-gray-700 dark:text-white dark:border-gray-600" onClick={onContinueWithoutLogin}>Continue without login</button>
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+            <div className="w-[min(92vw,28rem)] bg-white dark:bg-gray-900 p-6 sm:p-7 rounded-xl shadow-lg text-center border border-gray-200 dark:border-gray-800">
+              <h3 className="text-lg font-semibold mb-2">Welcome — personalize your experience</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">
+                Sign in to save your preferences to your account, or continue without signing in.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <button
+                  className="w-full sm:w-auto sm:flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg font-medium"
+                  onClick={() => {
+                    setShowAuth(true);
+                    setShowPrompt(false);
+                  }}
+                >
+                  Sign in
+                </button>
+                <button
+                  className="w-full sm:w-auto sm:flex-1 px-4 py-2.5 bg-gray-200 text-gray-900 rounded-lg border border-gray-300 hover:bg-gray-100 dark:bg-gray-700 dark:text-white dark:border-gray-600 font-medium"
+                  onClick={onContinueWithoutLogin}
+                >
+                  Continue without login
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* Auth modal (simple) */}
       {showAuth && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md bg-white dark:bg-gray-900 p-6 rounded shadow">
-            <div className="flex justify-between items-start">
-              <h3 className="text-lg font-semibold">Sign in</h3>
-              <button className="text-sm text-gray-500" onClick={() => setShowAuth(false)}>Close</button>
-            </div>
-            <div className="mt-4">
-              <Auth />
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+            <div className="w-[min(92vw,28rem)] bg-white dark:bg-gray-900 p-6 sm:p-7 rounded-xl shadow-lg border border-gray-200 dark:border-gray-800">
+              <div className="flex justify-between items-start">
+                <h3 className="text-lg font-semibold">Sign in</h3>
+                <button
+                  className="text-sm text-gray-500"
+                  onClick={() => {
+                    setShowAuth(false);
+                    onDismiss?.();
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="mt-4">
+                <Auth />
+              </div>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
-      <PreferenceModal visible={showPref} onClose={() => setShowPref(false)} onSavedLocal={handleSavedLocal} />
     </>
   );
 }
