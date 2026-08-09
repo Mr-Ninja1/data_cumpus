@@ -6,7 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import Toast from "@/components/Toast";
 import MobileTabBar from "@/components/MobileTabBar";
 import ClientExtras from "@/components/ClientExtras";
-import SiteBanner from "@/components/SiteBanner";
+import AppFrame from "@/components/AppFrame";
 import { PreferencesProvider } from "@/hooks/usePreferences";
 import { LibraryProvider } from "@/hooks/useLibrary";
 
@@ -37,10 +37,7 @@ export default function RootLayout({
               <div className="flex flex-1">
                 <Sidebar />
                 <main className="flex-1 w-full bg-white dark:bg-gray-950 md:bg-gray-50 md:dark:bg-gray-950">
-                  <div className="w-full max-w-7xl mx-auto px-3 md:px-8 pt-0 md:pt-6 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-8">
-                    <SiteBanner />
-                    {children}
-                  </div>
+                  <AppFrame>{children}</AppFrame>
                 </main>
               </div>
             </div>

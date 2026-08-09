@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabaseServer
       .from("profiles")
-      .select("id, display_name, role, permissions, created_at")
+      .select("id, display_name, role, permissions, is_verified, created_at")
       .order("created_at", { ascending: false })
       .limit(limit);
 

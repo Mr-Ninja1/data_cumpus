@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Home, Search, Plus, User, ShieldCheck, Wallet, FilePlus2 } from "lucide-react";
+import { Home, Search, Plus, User, Users, Wallet, FilePlus2 } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
 
 export default function MobileTabBar() {
@@ -11,10 +11,15 @@ export default function MobileTabBar() {
   const isHome = pathname === "/";
   const isSearch = pathname.startsWith("/search");
   const isUpload = pathname.startsWith("/upload");
-  const isVerify = pathname.startsWith("/verify");
+  const isPeople = pathname.startsWith("/people");
   const isWallet = pathname.startsWith("/wallet");
   const isProposals = pathname.startsWith("/workspace/proposals");
   const isProfile = pathname.startsWith("/profile") || pathname.startsWith("/u/");
+
+  // Admin gets its own dedicated Control Center shell — no public tab bar there
+  if (pathname.startsWith("/admin")) {
+    return null;
+  }
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 pb-[env(safe-area-inset-bottom)]">
@@ -66,15 +71,15 @@ export default function MobileTabBar() {
 
         <button
           type="button"
-          onClick={() => router.push("/verify")}
+          onClick={() => router.push("/people")}
           className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 ${
-            isVerify ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
+            isPeople ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
           }`}
-          aria-label="Verify"
-          aria-current={isVerify ? "page" : undefined}
+          aria-label="People"
+          aria-current={isPeople ? "page" : undefined}
         >
-          <ShieldCheck size={22} strokeWidth={isVerify ? 2.5 : 1.75} />
-          <span className="text-[10px] font-medium">Verify</span>
+          <Users size={22} strokeWidth={isPeople ? 2.5 : 1.75} />
+          <span className="text-[10px] font-medium">People</span>
         </button>
 
         <button

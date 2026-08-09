@@ -1,22 +1,42 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Bell,
+  Ban,
+  Check,
   CheckCheck,
   Headphones,
   Loader2,
+  Mail,
   MessageSquare,
   Send,
   ArrowLeft,
+  Shield,
+  X,
 } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useMessages } from "@/hooks/useMessages";
+import { useProfile } from "@/hooks/useProfile";
 import Auth from "@/components/Auth";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
+import VerifiedBadge from "@/components/VerifiedBadge";
 import { showToast } from "@/utils/toast";
+
+type PendingRequest = {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  subject: string | null;
+  body: string | null;
+  kind: "request";
+  metadata: { status?: string; fee_charged?: number };
+  created_at: string;
+  sender_name: string;
+  fee_charged: number;
+};
 
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -30,7 +50,13 @@ function relativeTime(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
 
-type Tab = "activity" | "messages";
+type Tab = "activity" | "messages" | "requests";
+
+function tabFromParam(value: string | null): Tab {
+  if (value === "messages") return "messages";
+  if (value === "requests") return "requests";
+  return "activity";
+}
 
 export default function InboxPage() {
   return (
@@ -43,10 +69,11 @@ export default function InboxPage() {
 function InboxContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") === "messages" ? "messages" : "activity";
+  const initialTab = tabFromParam(searchParams.get("tab"));
   const [tab, setTab] = useState<Tab>(initialTab);
   const [session, setSession] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const { isStaff } = useProfile();
   const { notifications, unreadCount, loading, markRead, markAllRead } = useNotifications();
   const {
     userId,
@@ -65,6 +92,9 @@ function InboxContent() {
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportBody, setSupportBody] = useState("");
   const [supportSending, setSupportSending] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [actioning, setActioning] = useState<{ id: string; action: string } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -82,9 +112,63 @@ function InboxContent() {
   }, []);
 
   useEffect(() => {
-    const t = searchParams.get("tab") === "messages" ? "messages" : "activity";
-    setTab(t);
+    setTab(tabFromParam(searchParams.get("tab")));
   }, [searchParams]);
+
+  const fetchRequests = useCallback(async () => {
+    const token = session?.access_token;
+    if (!token) {
+      setPendingRequests([]);
+      setRequestsLoading(false);
+      return;
+    }
+    setRequestsLoading(true);
+    try {
+      const res = await fetch("/api/social/message-requests", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json().catch(() => ({}));
+      setPendingRequests(res.ok ? json.requests || [] : []);
+    } finally {
+      setRequestsLoading(false);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    void fetchRequests();
+  }, [fetchRequests]);
+
+  const respondToRequest = async (id: string, action: "accept" | "decline" | "block") => {
+    const token = session?.access_token;
+    if (!token) return;
+    setActioning({ id, action });
+    try {
+      const res = await fetch(`/api/social/message-request/${id}/respond`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast("error", json.error || "Could not update request");
+        return;
+      }
+      setPendingRequests((prev) => prev.filter((r) => r.id !== id));
+      if (json.status === "accepted") {
+        showToast("success", "Accepted — check your Messages tab");
+        void refreshMsgs();
+      } else if (json.status === "declined") {
+        showToast("success", "Declined");
+      } else if (json.status === "blocked") {
+        showToast("success", "Blocked");
+      }
+    } finally {
+      setActioning(null);
+    }
+  };
 
   const thread = useMemo(
     () => (activePeer ? threadWith(activePeer) : []),
@@ -152,6 +236,23 @@ function InboxContent() {
 
   return (
     <div className="max-w-2xl mx-auto px-3 pt-4 md:px-0 md:pt-0">
+      {isStaff && (
+        <div className="w-full rounded-2xl bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-950/30 dark:to-yellow-950/20 border border-amber-200 dark:border-amber-800/50 p-4 mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <Shield className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-900 dark:text-amber-200">
+              You have staff tools — moderation reports, pending uploads, and the staff inbox live in the Control Center.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/admin/moderation")}
+            className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/30 hover:shadow-amber-500/50 transition-shadow"
+          >
+            Open Control Center →
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Inbox</h1>
@@ -207,6 +308,26 @@ function InboxContent() {
             Messages
             {msgUnread > 0 && (
               <span className="ml-1 text-[10px] bg-white/20 px-1.5 rounded-full">{msgUnread}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTab("requests");
+              router.replace("/inbox?tab=requests");
+            }}
+            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium ${
+              tab === "requests"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+            }`}
+          >
+            <Mail className="w-4 h-4" />
+            Requests
+            {pendingRequests.length > 0 && (
+              <span className="ml-1 text-[10px] bg-white/20 px-1.5 rounded-full">
+                {pendingRequests.length}
+              </span>
             )}
           </button>
         </div>
@@ -266,6 +387,91 @@ function InboxContent() {
             </ul>
           )}
         </>
+      ) : tab === "requests" && !activePeer ? (
+        requestsLoading ? (
+          <LoadingSkeleton />
+        ) : pendingRequests.length === 0 ? (
+          <Empty
+            icon={<Mail className="w-10 h-10" />}
+            title="No pending requests"
+            hint="Message requests from people you haven't connected with yet show up here."
+          />
+        ) : (
+          <ul className="space-y-3">
+            {pendingRequests.map((r) => {
+              const isActioning = (action: string) =>
+                actioning?.id === r.id && actioning.action === action;
+              const busy = actioning?.id === r.id;
+              return (
+                <li
+                  key={r.id}
+                  className="w-full p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"
+                >
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="min-w-0 flex items-center gap-1">
+                      <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
+                        {r.sender_name}
+                      </p>
+                      <VerifiedBadge role={undefined} isVerified={undefined} size="sm" />
+                    </div>
+                    <p className="text-xs text-gray-400 shrink-0">{relativeTime(r.created_at)}</p>
+                  </div>
+                  {r.body && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-3 mb-2 whitespace-pre-wrap break-words">
+                      {r.body}
+                    </p>
+                  )}
+                  {r.fee_charged > 0 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
+                      Paid {r.fee_charged} credit{r.fee_charged === 1 ? "" : "s"} to send this
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void respondToRequest(r.id, "accept")}
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white disabled:opacity-50"
+                    >
+                      {isActioning("accept") ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Check className="w-4 h-4" />
+                      )}
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void respondToRequest(r.id, "decline")}
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+                    >
+                      {isActioning("decline") ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <X className="w-4 h-4" />
+                      )}
+                      Decline
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void respondToRequest(r.id, "block")}
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 disabled:opacity-50"
+                    >
+                      {isActioning("block") ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Ban className="w-4 h-4" />
+                      )}
+                      Block
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )
       ) : activePeer ? (
         <div className="flex flex-col min-h-[60vh]">
           <div className="flex items-center gap-2 mb-4">

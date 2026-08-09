@@ -4,6 +4,49 @@ import React, { useEffect, useState } from "react";
 import { Camera, ShieldCheck, UploadCloud } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
 
+const MAX_DIMENSION = 1600;
+const TARGET_MAX_BYTES = 300 * 1024;
+
+/**
+ * Compresses an image client-side (resize + re-encode as WebP, targeting
+ * ~300KB) before it ever leaves the browser. Falls back to the original
+ * file untouched if the browser can't do canvas/WebP encoding for some
+ * reason (e.g. very old browsers) — never blocks a legitimate upload.
+ */
+async function compressImage(file: File): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    // Step down quality until we're under the target size (or give up at a
+    // sane floor so the image doesn't turn to mush).
+    let quality = 0.85;
+    let blob: Blob | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", quality));
+      if (!blob || blob.size <= TARGET_MAX_BYTES || quality <= 0.4) break;
+      quality -= 0.15;
+    }
+    if (!blob) return file;
+
+    const compressed = new File([blob], file.name.replace(/\.\w+$/, "") + ".webp", { type: "image/webp" });
+    return compressed.size < file.size ? compressed : file;
+  } catch {
+    return file;
+  }
+}
+
 export default function VerifyPage() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,8 +81,11 @@ export default function VerifyPage() {
       return;
     }
 
-    const filePath = `verify/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from("papers").upload(filePath, file, { contentType: file.type, upsert: false });
+    const uploadFile = await compressImage(file);
+    const filePath = `verify/${Date.now()}-${uploadFile.name}`;
+    const { error: uploadError } = await supabase.storage
+      .from("papers")
+      .upload(filePath, uploadFile, { contentType: uploadFile.type, upsert: false });
     if (uploadError) {
       setMessage(uploadError.message);
       setLoading(false);

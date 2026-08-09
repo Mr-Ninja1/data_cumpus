@@ -10,6 +10,7 @@ export function useProfile() {
   const [userId, setUserId] = useState<string | null>(null);
   const [role, setRole] = useState<AppRole>("user");
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [isVerified, setIsVerified] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,6 +22,7 @@ export function useProfile() {
         setUserId(null);
         setRole("user");
         setDisplayName(null);
+        setIsVerified(false);
         setLoading(false);
         return;
       }
@@ -43,7 +45,7 @@ export function useProfile() {
 
       const { data } = await supabase
         .from("profiles")
-        .select("role, display_name")
+        .select("role, display_name, is_verified")
         .eq("id", uid)
         .maybeSingle();
 
@@ -51,6 +53,7 @@ export function useProfile() {
       setUserId(uid);
       setRole((data?.role as AppRole) || "user");
       setDisplayName(data?.display_name || name);
+      setIsVerified(Boolean(data?.is_verified));
       setLoading(false);
     };
 
@@ -74,7 +77,7 @@ export function useProfile() {
   const isStaff = isStaffRole(role);
   const isTrusted = checkTrusted(role);
 
-  return { userId, role, displayName, loading, isStaff, isTrusted };
+  return { userId, role, displayName, isVerified, loading, isStaff, isTrusted };
 }
 
 export default useProfile;

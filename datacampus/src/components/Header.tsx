@@ -5,11 +5,12 @@ import { supabase } from "@/utils/supabaseClient";
 import { useRouter, usePathname } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile";
 import { useNotifications } from "@/hooks/useNotifications";
+import VerifiedBadge from "@/components/VerifiedBadge";
 
 export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
-  const { isStaff } = useProfile();
+  const { isStaff, role, isVerified } = useProfile();
   const { unreadCount } = useNotifications();
   const [user, setUser] = useState<any>(null);
   const [open, setOpen] = useState(false);
@@ -77,6 +78,11 @@ export default function Header() {
     await supabase.auth.signOut();
     setOpen(false);
   };
+
+  // Admin gets its own dedicated Control Center shell — no public header there
+  if (pathname?.startsWith("/admin")) {
+    return null;
+  }
 
   // Hide chrome header on paper viewer mobile (has its own top bar)
   if (pathname?.startsWith("/paper/")) {
@@ -146,6 +152,16 @@ export default function Header() {
         </button>
 
         <div className="flex items-center">
+          {isStaff && (
+            <button
+              type="button"
+              onClick={() => router.push("/admin")}
+              className="p-2 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 shadow-md shadow-amber-500/30 active:shadow-amber-500/50 mr-0.5"
+              aria-label="Control Center"
+            >
+              <Shield size={18} strokeWidth={2} />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => router.push("/notifications")}
@@ -237,6 +253,16 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-2">
+          {isStaff && (
+            <button
+              onClick={() => router.push("/admin")}
+              title="Control Center"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/30 hover:shadow-amber-500/50 transition-shadow"
+            >
+              <Shield size={18} />
+              <span className="hidden lg:inline">Control Center</span>
+            </button>
+          )}
           <button
             onClick={() => router.push("/upload")}
             title="Create"
@@ -282,8 +308,9 @@ export default function Header() {
             </button>
             {open && user && (
               <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-lg py-2 z-50">
-                <div className="px-3 py-2 text-sm text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-800 truncate">
-                  {user.email}
+                <div className="px-3 py-2 text-sm text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-800 flex items-center min-w-0">
+                  <span className="truncate">{user.email}</span>
+                  <VerifiedBadge role={role} isVerified={isVerified} size="sm" className="ml-1" />
                 </div>
                 <button onClick={() => router.push("/notifications")} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2">
                   <Bell size={14} /> Inbox
@@ -299,7 +326,7 @@ export default function Header() {
                     onClick={() => router.push("/admin")}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2"
                   >
-                    <Shield size={14} /> Review queue
+                    <Shield size={14} /> Control Center
                   </button>
                 )}
                 <button onClick={signOut} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-800">

@@ -10,6 +10,7 @@ import { showToast } from "@/utils/toast";
 import { bumpInterest } from "@/utils/interests";
 import CommentsSection from "@/components/CommentsSection";
 import ReportModal from "@/components/ReportModal";
+import VerifiedBadge from "@/components/VerifiedBadge";
 
 const PdfViewer = dynamic(() => import("@/components/PdfViewer"), { ssr: false });
 
@@ -37,6 +38,8 @@ export default function PaperDetailPage() {
   const viewerInnerRef = useRef<HTMLDivElement | null>(null);
   const [fileBuffer, setFileBuffer] = useState<string | ArrayBuffer | null>(null);
   const [uploaderName, setUploaderName] = useState<string | null>(null);
+  const [uploaderRole, setUploaderRole] = useState<string | null>(null);
+  const [uploaderVerified, setUploaderVerified] = useState<boolean | null>(null);
   const [showReport, setShowReport] = useState(false);
   const { isSaved, isLiked, toggleSave, toggleLike } = useLibrary();
 
@@ -123,10 +126,14 @@ export default function PaperDetailPage() {
         if (current.uploaded_by) {
           const { data: profile } = await supabase
             .from("profiles")
-            .select("display_name")
+            .select("display_name, role, is_verified")
             .eq("id", current.uploaded_by)
             .maybeSingle();
           if (mounted && profile?.display_name) setUploaderName(profile.display_name);
+          if (mounted) {
+            setUploaderRole(profile?.role ?? null);
+            setUploaderVerified(profile?.is_verified ?? null);
+          }
         }
 
         const { data: byProgram } = await supabase
@@ -274,11 +281,12 @@ export default function PaperDetailPage() {
                       {" · "}
                       <button
                         type="button"
-                        className="text-indigo-600 dark:text-indigo-400 hover:underline"
+                        className="text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center"
                         onClick={() => paper.uploaded_by && router.push(`/u/${paper.uploaded_by}`)}
                       >
                         {uploaderName}
                       </button>
+                      <VerifiedBadge role={uploaderRole} isVerified={uploaderVerified} size="sm" className="ml-0.5" />
                     </>
                   ) : null}
                 </p>

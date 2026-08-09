@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { downloadPaper } from "@/utils/downloadPaper";
 import { showToast } from "@/utils/toast";
 import { useLibrary } from "@/hooks/useLibrary";
+import VerifiedBadge from "@/components/VerifiedBadge";
 
 interface PaperCardProps {
   id: string;
@@ -16,6 +17,8 @@ interface PaperCardProps {
   uploadedAt?: string;
   uploaderName?: string | null;
   uploadedBy?: string | null;
+  uploaderRole?: string | null;
+  uploaderVerified?: boolean | null;
   variant?: "grid" | "shorts" | "feed";
 }
 
@@ -70,6 +73,8 @@ export default function PaperCard({
   uploadedAt,
   uploaderName,
   uploadedBy,
+  uploaderRole,
+  uploaderVerified,
   variant = "grid",
 }: PaperCardProps) {
   const router = useRouter();
@@ -163,8 +168,9 @@ export default function PaperCard({
               {title}
             </h3>
             <p className="mt-1 text-[12px] text-gray-500 dark:text-gray-400 leading-snug line-clamp-1">
-              <button type="button" onClick={openChannel} className="hover:text-gray-700 dark:hover:text-gray-300">
+              <button type="button" onClick={openChannel} className="hover:text-gray-700 dark:hover:text-gray-300 inline-flex items-center">
                 {channel}
+                <VerifiedBadge role={uploaderRole} isVerified={uploaderVerified} size="xs" className="ml-0.5" />
               </button>
               {" · "}
               {program}
@@ -290,8 +296,9 @@ export default function PaperCard({
             <h3 className="font-semibold text-[15px] sm:text-base line-clamp-2 mb-1.5 text-gray-900 dark:text-gray-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
               {title}
             </h3>
-            <div className="text-sm text-gray-600 dark:text-gray-300 truncate">
-              {channel}
+            <div className="text-sm text-gray-600 dark:text-gray-300 truncate flex items-center">
+              <span className="truncate">{channel}</span>
+              <VerifiedBadge role={uploaderRole} isVerified={uploaderVerified} size="xs" className="ml-0.5" />
             </div>
             <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
               <span className="truncate">{program}</span>

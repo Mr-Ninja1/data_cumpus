@@ -2,9 +2,10 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, CheckCheck, Loader2 } from "lucide-react";
+import { Bell, CheckCheck, Loader2, Shield } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useProfile } from "@/hooks/useProfile";
 import Auth from "@/components/Auth";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 
@@ -25,6 +26,7 @@ export default function NotificationsPage() {
   const [session, setSession] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const { notifications, unreadCount, loading, markRead, markAllRead } = useNotifications();
+  const { isStaff } = useProfile();
 
   useEffect(() => {
     let mounted = true;
@@ -57,6 +59,23 @@ export default function NotificationsPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-3 pt-4 md:px-0 md:pt-0">
+      {isStaff && (
+        <div className="w-full rounded-2xl bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-950/30 dark:to-yellow-950/20 border border-amber-200 dark:border-amber-800/50 p-4 mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <Shield className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-900 dark:text-amber-200">
+              You&apos;re viewing your personal notifications — moderation alerts and platform stats live in the Control Center.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/admin")}
+            className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/30 hover:shadow-amber-500/50 transition-shadow"
+          >
+            Open Control Center →
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Bell className="text-indigo-600 dark:text-indigo-400" />

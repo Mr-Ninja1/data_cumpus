@@ -44,6 +44,10 @@ export async function PATCH(
       updates.role = body.role;
     }
 
+    if (typeof body?.isVerified === "boolean") {
+      updates.is_verified = body.isVerified;
+    }
+
     if (body?.permissions && typeof body.permissions === "object") {
       const { data: existing } = await supabaseServer
         .from("profiles")
@@ -66,7 +70,7 @@ export async function PATCH(
       .from("profiles")
       .update(updates)
       .eq("id", targetId)
-      .select("id, display_name, role, permissions")
+      .select("id, display_name, role, permissions, is_verified")
       .single();
 
     if (error) {

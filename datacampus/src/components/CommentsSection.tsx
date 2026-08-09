@@ -6,6 +6,7 @@ import { supabase } from "@/utils/supabaseClient";
 import { useProfile } from "@/hooks/useProfile";
 import { showToast } from "@/utils/toast";
 import ReportModal from "@/components/ReportModal";
+import VerifiedBadge from "@/components/VerifiedBadge";
 
 export type CommentRow = {
   id: string;
@@ -16,6 +17,8 @@ export type CommentRow = {
   is_hidden: boolean;
   created_at: string;
   author_name?: string;
+  author_role?: string | null;
+  author_verified?: boolean | null;
   replies?: CommentRow[];
 };
 
@@ -87,18 +90,24 @@ export default function CommentsSection({ paperId, paperTitle }: Props) {
   const attachNames = async (rows: CommentRow[]): Promise<CommentRow[]> => {
     const userIds = [...new Set(rows.map((r) => r.user_id))];
     const nameMap: Record<string, string> = {};
+    const roleMap: Record<string, string | null> = {};
+    const verifiedMap: Record<string, boolean | null> = {};
     if (userIds.length) {
       const { data: profiles } = await supabase
         .from("profiles")
-        .select("id, display_name")
+        .select("id, display_name, role, is_verified")
         .in("id", userIds);
       for (const p of profiles || []) {
         nameMap[p.id] = p.display_name || "Student";
+        roleMap[p.id] = p.role ?? null;
+        verifiedMap[p.id] = p.is_verified ?? null;
       }
     }
     return rows.map((r) => ({
       ...r,
       author_name: nameMap[r.user_id] || "Student",
+      author_role: roleMap[r.user_id] ?? null,
+      author_verified: verifiedMap[r.user_id] ?? null,
     }));
   };
 
@@ -403,8 +412,9 @@ export default function CommentsSection({ paperId, paperTitle }: Props) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center">
                       {c.author_name}
+                      <VerifiedBadge role={c.author_role} isVerified={c.author_verified} size="xs" className="ml-0.5" />
                     </span>
                     <span className="text-xs text-gray-400">{relativeTime(c.created_at)}</span>
                     {c.is_hidden && isStaff && (
@@ -426,8 +436,9 @@ export default function CommentsSection({ paperId, paperTitle }: Props) {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center">
                                 {r.author_name}
+                                <VerifiedBadge role={r.author_role} isVerified={r.author_verified} size="xs" className="ml-0.5" />
                               </span>
                               <span className="text-xs text-gray-400">{relativeTime(r.created_at)}</span>
                             </div>

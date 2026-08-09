@@ -1,15 +1,39 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 import PaperCard from "@/components/PaperCard";
 import PaperFilters from "@/components/PaperFilters";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import EmptyState from "@/components/EmptyState";
+import VerifiedBadge from "@/components/VerifiedBadge";
 import { usePreferences } from "@/hooks/usePreferences";
 import { softRankPapers, topInterestPrograms } from "@/utils/interests";
 import { fetchFollowingIds } from "@/hooks/useFollow";
-import { Bell, FileText, SlidersHorizontal } from "lucide-react";
+import { Bell, FileText, Sparkles, SlidersHorizontal } from "lucide-react";
+
+interface SpotlightProfile {
+  id: string;
+  displayName: string | null;
+  role: string | null;
+  isVerified: boolean | null;
+}
+
+const SPOTLIGHT_GRADIENTS = [
+  "from-indigo-500 to-purple-500",
+  "from-emerald-500 to-teal-500",
+  "from-amber-500 to-orange-500",
+  "from-pink-500 to-rose-500",
+  "from-sky-500 to-blue-500",
+  "from-violet-500 to-fuchsia-500",
+];
+
+function spotlightGradientFor(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return SPOTLIGHT_GRADIENTS[hash % SPOTLIGHT_GRADIENTS.length];
+}
 
 interface Paper {
   id: string;
@@ -21,9 +45,12 @@ interface Paper {
   uploadedAt: any;
   uploadedBy?: string | null;
   uploaderName?: string | null;
+  uploaderRole?: string | null;
+  uploaderVerified?: boolean | null;
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSchool, setSelectedSchool] = useState("");
@@ -31,7 +58,27 @@ export default function HomePage() {
   const [selectedType, setSelectedType] = useState("");
   const [showDesktopFilters, setShowDesktopFilters] = useState(false);
   const [subscriptionFeed, setSubscriptionFeed] = useState<Paper[]>([]);
+  const [spotlightProfiles, setSpotlightProfiles] = useState<SpotlightProfile[]>([]);
   const { preferences } = usePreferences();
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/social/spotlight");
+        const json = await res.json();
+        if (!mounted) return;
+        if (Array.isArray(json?.profiles)) {
+          setSpotlightProfiles(json.profiles);
+        }
+      } catch {
+        // Fail silently — this is decorative, non-critical content.
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     // Soft model: never auto-lock filters from preferences.
@@ -59,6 +106,8 @@ export default function HomePage() {
               uploadedAt: row.uploaded_at,
               uploadedBy: row.uploaded_by ?? null,
               uploaderName: null as string | null,
+              uploaderRole: null as string | null,
+              uploaderVerified: null as boolean | null,
             }) as Paper
         );
 
@@ -66,15 +115,21 @@ export default function HomePage() {
         if (uploaderIds.length) {
           const { data: profiles } = await supabase
             .from("profiles")
-            .select("id, display_name")
+            .select("id, display_name, role, is_verified")
             .in("id", uploaderIds);
           const nameMap: Record<string, string> = {};
+          const roleMap: Record<string, string | null> = {};
+          const verifiedMap: Record<string, boolean | null> = {};
           for (const p of profiles || []) {
             nameMap[p.id] = p.display_name || "Uploader";
+            roleMap[p.id] = p.role ?? null;
+            verifiedMap[p.id] = p.is_verified ?? null;
           }
           for (const paper of mapped) {
             if (paper.uploadedBy && nameMap[paper.uploadedBy]) {
               paper.uploaderName = nameMap[paper.uploadedBy];
+              paper.uploaderRole = roleMap[paper.uploadedBy] ?? null;
+              paper.uploaderVerified = verifiedMap[paper.uploadedBy] ?? null;
             }
           }
         }
@@ -121,6 +176,8 @@ export default function HomePage() {
             uploadedAt: row.uploaded_at,
             uploadedBy: row.uploaded_by ?? null,
             uploaderName: null as string | null,
+            uploaderRole: null as string | null,
+            uploaderVerified: null as boolean | null,
           }) as Paper
       );
 
@@ -128,15 +185,21 @@ export default function HomePage() {
       if (uploaderIds.length) {
         const { data: profiles } = await supabase
           .from("profiles")
-          .select("id, display_name")
+          .select("id, display_name, role, is_verified")
           .in("id", uploaderIds);
         const nameMap: Record<string, string> = {};
+        const roleMap: Record<string, string | null> = {};
+        const verifiedMap: Record<string, boolean | null> = {};
         for (const p of profiles || []) {
           nameMap[p.id] = p.display_name || "Uploader";
+          roleMap[p.id] = p.role ?? null;
+          verifiedMap[p.id] = p.is_verified ?? null;
         }
         for (const paper of mapped) {
           if (paper.uploadedBy && nameMap[paper.uploadedBy]) {
             paper.uploaderName = nameMap[paper.uploadedBy];
+            paper.uploaderRole = roleMap[paper.uploadedBy] ?? null;
+            paper.uploaderVerified = verifiedMap[paper.uploadedBy] ?? null;
           }
         }
       }
@@ -321,6 +384,8 @@ export default function HomePage() {
                     uploadedAt={paper.uploadedAt}
                     uploaderName={paper.uploaderName}
                     uploadedBy={paper.uploadedBy}
+                    uploaderRole={paper.uploaderRole}
+                    uploaderVerified={paper.uploaderVerified}
                     variant="feed"
                   />
                 ))}
@@ -337,8 +402,50 @@ export default function HomePage() {
                     uploadedAt={paper.uploadedAt}
                     uploaderName={paper.uploaderName}
                     uploadedBy={paper.uploadedBy}
+                    uploaderRole={paper.uploaderRole}
+                    uploaderVerified={paper.uploaderVerified}
                   />
                 ))}
+              </div>
+            </section>
+          )}
+
+          {/* Discover — subtle sponsored-mentions strip (Spotlight profiles) */}
+          {spotlightProfiles.length > 0 && (
+            <section className="w-full mb-4 md:mb-6 pt-3 md:pt-0">
+              <div className="flex items-center gap-2 px-3 md:px-0 mb-2">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <h3 className="text-sm md:text-base font-semibold text-gray-900 dark:text-white">
+                  Discover
+                </h3>
+              </div>
+              <div className="flex gap-2 overflow-x-auto px-3 md:px-0 pb-1 scrollbar-hide md:flex-wrap md:overflow-x-visible">
+                {spotlightProfiles.map((p) => {
+                  const name = p.displayName || "Unnamed user";
+                  const initial = (p.displayName || "U").trim().charAt(0).toUpperCase() || "U";
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => router.push(`/u/${p.id}`)}
+                      className="flex-shrink-0 flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors max-w-[200px]"
+                    >
+                      <span
+                        className={`h-7 w-7 rounded-full bg-gradient-to-br ${spotlightGradientFor(
+                          p.id
+                        )} flex items-center justify-center text-white text-xs font-semibold shrink-0`}
+                      >
+                        {initial}
+                      </span>
+                      <span className="flex items-center gap-1 min-w-0">
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                          {name}
+                        </span>
+                        <VerifiedBadge role={p.role} isVerified={p.isVerified} size="xs" />
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -364,6 +471,8 @@ export default function HomePage() {
                         uploadedAt={paper.uploadedAt}
                         uploaderName={paper.uploaderName}
                         uploadedBy={paper.uploadedBy}
+                        uploaderRole={paper.uploaderRole}
+                        uploaderVerified={paper.uploaderVerified}
                         variant="shorts"
                       />
                     </div>
@@ -384,6 +493,8 @@ export default function HomePage() {
                   uploadedAt={paper.uploadedAt}
                   uploaderName={paper.uploaderName}
                   uploadedBy={paper.uploadedBy}
+                  uploaderRole={paper.uploaderRole}
+                  uploaderVerified={paper.uploaderVerified}
                   variant="feed"
                 />
               ))}
@@ -404,6 +515,8 @@ export default function HomePage() {
                   uploadedAt={paper.uploadedAt}
                   uploaderName={paper.uploaderName}
                   uploadedBy={paper.uploadedBy}
+                  uploaderRole={paper.uploaderRole}
+                  uploaderVerified={paper.uploaderVerified}
                 />
               ))}
             </div>

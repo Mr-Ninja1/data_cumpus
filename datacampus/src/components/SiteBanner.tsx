@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Megaphone, X, ExternalLink } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 
 type Announcement = {
   id: string;
@@ -47,6 +47,7 @@ function kindStyles(kind: string) {
 
 export default function SiteBanner() {
   const router = useRouter();
+  const pathname = usePathname();
   const [items, setItems] = useState<Announcement[]>([]);
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export default function SiteBanner() {
     };
   }, []);
 
+  if (pathname?.startsWith("/admin")) return null;
   if (items.length === 0) return null;
 
   const a = items[0];

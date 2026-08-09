@@ -1,11 +1,12 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { usePreferences } from "@/hooks/usePreferences";
-import { Home, X, GraduationCap, BookOpen, Upload, User, LogIn, LogOut, ChevronRight, ShieldCheck, Wallet, FilePlus2 } from "lucide-react";
+import { Home, X, GraduationCap, BookOpen, Upload, User, LogIn, LogOut, ChevronRight, ShieldCheck, Wallet, FilePlus2, Shield, Users } from "lucide-react";
 import { Bell, Inbox, Search } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 import { bumpInterest } from "@/utils/interests";
+import { useProfile } from "@/hooks/useProfile";
 
 const categories = [
   {
@@ -55,10 +56,12 @@ const schoolsWithIcons = [
 export default function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
+  const isAdminRoute = pathname?.startsWith("/admin");
   const [open, setOpen] = useState<boolean>(false);
   const [mobileOpen, setMobileOpen] = useState<boolean>(false);
   const { preferences, setPreferences } = usePreferences();
   const [user, setUser] = useState<any>(null);
+  const { isStaff } = useProfile();
 
   // On mount, read persisted sidebar state; do this in effect to avoid
   // hydration mismatch between server and client renders.
@@ -144,6 +147,11 @@ export default function Sidebar() {
     setMobileOpen(false);
   };
 
+  // Admin gets its own dedicated Control Center shell — no public sidebar there
+  if (isAdminRoute) {
+    return null;
+  }
+
   return (
     <>
       {/* Mobile Backdrop */}
@@ -164,8 +172,10 @@ export default function Sidebar() {
         <nav className="mt-3 px-2 w-full">
           <div className="flex flex-col gap-1">
             {[
+              ...(isStaff ? [{ href: "/admin", label: "Control Center", icon: Shield, staff: true }] : []),
               { href: "/", label: "Home", icon: Home },
               { href: "/search", label: "Explore", icon: Search },
+              { href: "/people", label: "People", icon: Users },
               { href: "/inbox", label: "Inbox", icon: Inbox },
               { href: "/notifications", label: "Updates", icon: Bell },
               { href: "/upload", label: "Upload", icon: Upload },
@@ -179,13 +189,16 @@ export default function Sidebar() {
                 item.href === "/"
                   ? pathname === "/"
                   : pathname === item.href || pathname.startsWith(item.href + "/");
+              const isControlCenter = Boolean((item as { staff?: boolean }).staff);
               return (
                 <button
                   key={item.href}
                   type="button"
                   onClick={() => router.push(item.href)}
                   className={`w-full transition-colors ${
-                    active
+                    isControlCenter
+                      ? "bg-gradient-to-r from-amber-400/10 to-yellow-500/10 text-amber-600 dark:text-amber-400 border border-amber-400/30 rounded-xl"
+                      : active
                       ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300"
                       : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200"
                   }`}
@@ -193,7 +206,13 @@ export default function Sidebar() {
                 >
                   {open ? (
                     <span className="inline-flex items-center gap-3 px-3 py-2.5 rounded-xl w-full">
-                      <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-800">
+                      <span
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                          isControlCenter
+                            ? "bg-amber-400/20"
+                            : "bg-gray-100 dark:bg-gray-800"
+                        }`}
+                      >
                         <Icon size={17} />
                       </span>
                       <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>
@@ -303,6 +322,20 @@ export default function Sidebar() {
               </div>
               <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
             </button>
+
+            {isStaff && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileOpen(false);
+                  router.push("/admin");
+                }}
+                className="w-full mt-2 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/30 transition-shadow"
+              >
+                <Shield className="w-4 h-4" />
+                Control Center
+              </button>
+            )}
 
             <div className="mt-2 flex gap-2">
               <button

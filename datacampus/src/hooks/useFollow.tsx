@@ -76,27 +76,28 @@ export function useFollow(targetUserId: string | null | undefined) {
         setFollowerCount((c) => Math.max(0, c - 1));
         showToast("success", "Unsubscribed");
       } else {
-        const { error } = await supabase.from("follows").insert({
-          follower_id: currentUserId,
-          following_id: targetUserId,
-        });
-        if (error) throw error;
-        setIsFollowing(true);
-        setFollowerCount((c) => c + 1);
-        showToast("success", "Subscribed");
-
+        // Routed through the server so a follow fee (if the channel has set
+        // one) can be enforced honestly, and blocked users can't follow.
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData.session?.access_token;
-        if (token) {
-          void fetch("/api/social/follow-notify", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ followingId: targetUserId }),
-          });
+        const res = await fetch("/api/social/follow", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ followingId: targetUserId }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(json?.error || "Could not subscribe");
         }
+        setIsFollowing(true);
+        setFollowerCount((c) => c + 1);
+        showToast(
+          "success",
+          json?.feeCharged > 0 ? `Subscribed — paid ${json.feeCharged} credits` : "Subscribed"
+        );
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Could not update subscription";
