@@ -44,11 +44,12 @@ export async function POST(req: NextRequest) {
     user_id: user.id,
     kind: 'spend',
     credits_delta: -amount,
-    cash_amount: 0,
-    currency: 'TZS',
+    cash_amount_cents: 0,
+    currency: 'ZMW',
     status: 'completed',
     provider: 'internal',
     reference: body.reference || null,
+    description: body.reason || 'ai-action',
     metadata: { reason: body.reason || 'ai-action' },
   });
 

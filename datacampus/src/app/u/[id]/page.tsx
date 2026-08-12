@@ -7,11 +7,15 @@ import PaperCard from "@/components/PaperCard";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import EmptyState from "@/components/EmptyState";
 import FollowButton from "@/components/FollowButton";
-import { useFollow } from "@/hooks/useFollow";
 import VerifiedBadge from "@/components/VerifiedBadge";
+import { useFollow } from "@/hooks/useFollow";
 import { isStaffRole } from "@/utils/staff";
 import { showToast } from "@/utils/toast";
+import { enrichEngagement, mapPaperRow } from "@/utils/engagement";
 import {
+  ArrowUpRight,
+  BadgeCheck,
+  FileText,
   Users,
   Upload,
   MessageCircle,
@@ -19,6 +23,7 @@ import {
   Send,
   Loader2,
   Lock,
+  Wallet,
 } from "lucide-react";
 
 interface Paper {
@@ -29,6 +34,9 @@ interface Paper {
   title: string;
   uploadedAt: string;
   uploadedBy?: string | null;
+  viewCount?: number;
+  likeCount?: number;
+  uploaderVerified?: boolean;
 }
 
 interface Post {
@@ -122,6 +130,7 @@ export default function ChannelPage() {
   const [name, setName] = useState("Uploader");
   const [role, setRole] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState<boolean | null>(null);
+  const [program, setProgram] = useState<string | null>(null);
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
   const { followerCount, followingCount, isSelf } = useFollow(params?.id);
@@ -161,7 +170,11 @@ export default function ChannelPage() {
     (async () => {
       setLoading(true);
       const [{ data: profile }, { data, error }] = await Promise.all([
-        supabase.from("profiles").select("display_name, role, is_verified").eq("id", params.id).maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("display_name, full_name, role, is_verified, verification_status, program")
+          .eq("id", params.id)
+          .maybeSingle(),
         supabase
           .from("papers")
           .select("*")
@@ -171,24 +184,40 @@ export default function ChannelPage() {
       ]);
 
       if (!mounted) return;
-      if (profile?.display_name) setName(profile.display_name);
-      setRole(profile?.role ?? null);
-      setIsVerified(profile?.is_verified ?? null);
+
+      const channelVerified = profile
+        ? Boolean(profile.is_verified) || profile.verification_status === "verified"
+        : false;
+
+      if (profile) {
+        setName(profile.full_name || profile.display_name || "Uploader");
+        setRole(profile.role ?? null);
+        setIsVerified(channelVerified);
+        setProgram(profile.program || null);
+      }
+
       if (error) {
         console.warn(error.message);
         setPapers([]);
       } else {
-        setPapers(
-          (data || []).map((row: any) => ({
-            id: row.id,
-            school: row.school,
-            program: row.program,
-            type: row.type,
-            title: row.title,
-            uploadedAt: row.uploaded_at,
-            uploadedBy: row.uploaded_by,
-          }))
+        const mapped = await enrichEngagement(
+          (data || []).map((row: any) => {
+            const m = mapPaperRow(row);
+            return {
+              id: m.id,
+              school: m.school,
+              program: m.program,
+              type: m.type,
+              title: m.title,
+              uploadedAt: m.uploadedAt,
+              uploadedBy: m.uploadedBy,
+              viewCount: m.viewCount,
+              likeCount: m.likeCount,
+              uploaderVerified: channelVerified,
+            } as Paper;
+          })
         );
+        setPapers(mapped);
       }
       setLoading(false);
     })();
@@ -338,196 +367,317 @@ export default function ChannelPage() {
       <button
         type="button"
         onClick={() => router.back()}
-        className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 mb-4"
+        className="mb-4 text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
       >
         ← Back
       </button>
 
-      {/* YouTube-style channel header */}
-      <div className="mb-6 p-4 sm:p-6 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <div
-            className={`h-20 w-20 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-2xl font-bold text-white shrink-0 ${
-              isStaffRole(role)
-                ? "ring-2 ring-amber-400/60 ring-offset-2 ring-offset-white dark:ring-offset-gray-900"
-                : isVerified
-                  ? "ring-2 ring-sky-400/60 ring-offset-2 ring-offset-white dark:ring-offset-gray-900"
-                  : ""
-            }`}
-          >
-            {name[0]?.toUpperCase() || "U"}
+      <section className="mb-6 overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-[0_20px_60px_-35px_rgba(79,70,229,0.45)] dark:border-gray-800 dark:bg-gray-900">
+        <div className="relative overflow-hidden bg-gradient-to-r from-[#2b0a63] via-[#4f2cc9] to-[#6d28d9] px-4 pb-16 pt-5 sm:px-6 sm:pb-20">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -right-10 top-0 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+            <div className="absolute left-10 top-8 h-24 w-24 rounded-full bg-cyan-300/20 blur-2xl" />
           </div>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate inline-flex items-center">
-              {name}
-              <VerifiedBadge role={role} isVerified={isVerified} size="md" className="ml-1" />
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-gray-500 dark:text-gray-400">
-              <span className="inline-flex items-center gap-1">
-                <Users className="w-3.5 h-3.5" />
-                {formatCount(followerCount)} subscriber{followerCount === 1 ? "" : "s"}
-              </span>
-              <span>·</span>
-              <span>{formatCount(followingCount)} following</span>
-              <span>·</span>
-              <span className="inline-flex items-center gap-1">
-                <Upload className="w-3.5 h-3.5" />
-                {loading ? "…" : `${papers.length} upload${papers.length === 1 ? "" : "s"}`}
-              </span>
-              {reputation !== null && (
-                <>
-                  <span>·</span>
-                  <span className="inline-flex items-center gap-1">
-                    💰 {reputation.toLocaleString()} reputation
-                  </span>
-                </>
-              )}
+          <div className="relative flex items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur">
+              <BadgeCheck className="h-3.5 w-3.5" />
+              {isVerified ? "Verified profile" : "Campus profile"}
             </div>
-          </div>
-          {!isSelf && !blocked && (
-            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-              <FollowButton userId={params.id} />
-              <button
-                type="button"
-                onClick={() => setComposerOpen((o) => !o)}
-                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                <MessageCircle className="w-4 h-4" />
-                Message
-              </button>
+            {!isSelf && !blocked && (
               <div className="relative">
                 <button
                   type="button"
                   aria-label="More actions"
                   onClick={() => setMenuOpen((o) => !o)}
-                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
+                  className="rounded-full border border-white/15 bg-white/10 p-2 text-white/80 backdrop-blur transition hover:bg-white/15"
                 >
-                  <MoreVertical className="w-4 h-4" />
+                  <MoreVertical className="h-4 w-4" />
                 </button>
                 {menuOpen && (
-                  <div className="absolute right-0 mt-1 w-40 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-lg z-10 overflow-hidden">
+                  <div className="absolute right-0 z-10 mt-2 w-40 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900">
                     <button
                       type="button"
                       disabled={blocking}
                       onClick={() => void blockUser()}
-                      className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 transition hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
                     >
                       {blocking ? "Blocking..." : "Block user"}
                     </button>
                   </div>
                 )}
               </div>
+            )}
+          </div>
+        </div>
+
+        <div className="relative px-4 pb-5 sm:px-6 sm:pb-6">
+          <div className="-mt-12 flex flex-col gap-5 lg:-mt-14 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex min-w-0 items-end gap-4">
+              <div
+                className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-[1.75rem] bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 text-3xl font-bold text-white shadow-xl shadow-violet-500/30 ring-4 ring-white dark:ring-gray-900 ${
+                  isStaffRole(role)
+                    ? "outline outline-2 outline-amber-400/70"
+                    : isVerified
+                      ? "outline outline-2 outline-sky-400/70"
+                      : ""
+                }`}
+              >
+                {name[0]?.toUpperCase() || "U"}
+              </div>
+
+              <div className="min-w-0 pb-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="truncate text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
+                    {name}
+                  </h1>
+                  <VerifiedBadge role={role} isVerified={isVerified} size="md" />
+                </div>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {program || "Student on DataCampus"}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+                    @{name.toLowerCase().replace(/\s+/g, "")}
+                  </span>
+                  {isStaffRole(role) && (
+                    <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+                      Staff
+                    </span>
+                  )}
+                  {!isStaffRole(role) && (
+                    <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                      Student creator
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {!isSelf && !blocked && (
+              <div className="flex w-full flex-wrap gap-2 lg:w-auto lg:justify-end">
+                <FollowButton userId={params.id} className="flex-1 sm:flex-none" />
+                <button
+                  type="button"
+                  onClick={() => setComposerOpen((o) => !o)}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800 sm:flex-none"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  Message
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/inbox?tab=messages&peer=${params.id}`)}
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 dark:bg-white dark:text-gray-900"
+                >
+                  <ArrowUpRight className="h-4 w-4" />
+                  Open chat
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
+              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                <Users className="h-4 w-4 text-violet-500" />
+                <span className="text-xs font-medium uppercase tracking-wide">Followers</span>
+              </div>
+              <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{formatCount(followerCount)}</p>
+            </div>
+            <div className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
+              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                <Users className="h-4 w-4 text-sky-500" />
+                <span className="text-xs font-medium uppercase tracking-wide">Following</span>
+              </div>
+              <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{formatCount(followingCount)}</p>
+            </div>
+            <div className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
+              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                <Upload className="h-4 w-4 text-indigo-500" />
+                <span className="text-xs font-medium uppercase tracking-wide">Uploads</span>
+              </div>
+              <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {loading ? "…" : formatCount(papers.length)}
+              </p>
+            </div>
+            <div className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950">
+              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                <Wallet className="h-4 w-4 text-amber-500" />
+                <span className="text-xs font-medium uppercase tracking-wide">Reputation</span>
+              </div>
+              <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {reputation !== null ? formatCount(reputation) : "—"}
+              </p>
+            </div>
+          </div>
+
+          {composerOpen && !blocked && (
+            <div className="mt-5 rounded-[1.75rem] border border-gray-200 bg-gradient-to-br from-white to-violet-50 p-4 dark:border-gray-800 dark:from-gray-950 dark:to-violet-950/20">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Start a conversation</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Send a quick intro and they will receive it as a message request.
+                  </p>
+                </div>
+              </div>
+              <textarea
+                value={composerText}
+                onChange={(e) => setComposerText(e.target.value)}
+                rows={4}
+                maxLength={4000}
+                placeholder={`Write a message to ${name}...`}
+                className="mb-3 w-full resize-none rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+              />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setComposerOpen(false);
+                    setComposerText("");
+                  }}
+                  className="rounded-full bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={composerSending || !composerText.trim()}
+                  onClick={() => void sendMessageRequest()}
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {composerSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  Send request
+                </button>
+              </div>
             </div>
           )}
         </div>
+      </section>
 
-        {composerOpen && !blocked && (
-          <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 w-full">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Message {name}
-            </label>
-            <textarea
-              value={composerText}
-              onChange={(e) => setComposerText(e.target.value)}
-              rows={4}
-              maxLength={4000}
-              placeholder="Write your message..."
-              className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm resize-none mb-3"
-            />
-            <div className="flex flex-col sm:flex-row gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setComposerOpen(false);
-                  setComposerText("");
-                }}
-                className="w-full sm:w-auto sm:flex-none order-2 sm:order-1 py-2.5 px-4 rounded-xl bg-gray-100 dark:bg-gray-800 text-sm font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={composerSending || !composerText.trim()}
-                onClick={() => void sendMessageRequest()}
-                className="w-full sm:flex-1 order-1 sm:order-2 py-2.5 px-4 rounded-xl bg-indigo-600 text-white text-sm font-medium disabled:opacity-50 inline-flex items-center justify-center gap-2"
-              >
-                {composerSending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-                Send
-              </button>
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
+        <div className="space-y-6">
+          <div className="rounded-[1.75rem] border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Uploads</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Academic files shared by {name}.</p>
+              </div>
+              <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                {loading ? "…" : `${papers.length} total`}
+              </span>
+            </div>
+
+            {loading ? (
+              <LoadingSkeleton />
+            ) : papers.length === 0 ? (
+              <EmptyState type="no-papers" />
+            ) : (
+              <>
+                <div className="divide-y divide-transparent md:hidden">
+                  {papers.map((p) => (
+                    <PaperCard
+                      key={p.id}
+                      id={p.id}
+                      title={p.title}
+                      program={p.program}
+                      type={p.type}
+                      school={p.school}
+                      uploadedAt={p.uploadedAt}
+                      uploaderName={name}
+                      uploadedBy={params.id}
+                      uploaderRole={role}
+                      viewCount={p.viewCount}
+                      likeCount={p.likeCount}
+                      uploaderVerified={p.uploaderVerified ?? isVerified}
+                      variant="feed"
+                    />
+                  ))}
+                </div>
+                <div className="hidden gap-4 md:grid md:grid-cols-2">
+                  {papers.map((p) => (
+                    <PaperCard
+                      key={p.id}
+                      id={p.id}
+                      title={p.title}
+                      program={p.program}
+                      type={p.type}
+                      uploadedAt={p.uploadedAt}
+                      uploaderName={name}
+                      uploadedBy={params.id}
+                      uploaderRole={role}
+                      viewCount={p.viewCount}
+                      likeCount={p.likeCount}
+                      uploaderVerified={p.uploaderVerified ?? isVerified}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="rounded-[1.75rem] border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">About</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Quick profile snapshot.</p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="rounded-2xl bg-gray-50 p-3 dark:bg-gray-950">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {isVerified ? "Verified student" : "Community member"}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-gray-50 p-3 dark:bg-gray-950">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Program</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">{program || "Not added yet"}</p>
+              </div>
+              <div className="rounded-2xl bg-gray-50 p-3 dark:bg-gray-950">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Content</p>
+                <p className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {posts.length} post{posts.length === 1 ? "" : "s"} and {papers.length} upload{papers.length === 1 ? "" : "s"}
+                </p>
+              </div>
             </div>
           </div>
-        )}
-      </div>
 
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 px-0.5">Videos</h2>
+          <div className="rounded-[1.75rem] border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Feed</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Recent updates from {name}.</p>
+              </div>
+              <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">
+                <FileText className="h-3.5 w-3.5" />
+                {posts.length} post{posts.length === 1 ? "" : "s"}
+              </span>
+            </div>
 
-      {loading ? (
-        <LoadingSkeleton />
-      ) : papers.length === 0 ? (
-        <EmptyState type="no-papers" />
-      ) : (
-        <>
-          <div className="md:hidden divide-y divide-transparent">
-            {papers.map((p) => (
-              <PaperCard
-                key={p.id}
-                id={p.id}
-                title={p.title}
-                program={p.program}
-                type={p.type}
-                school={p.school}
-                uploadedAt={p.uploadedAt}
-                uploaderName={name}
-                uploadedBy={params.id}
-                uploaderRole={role}
-                uploaderVerified={isVerified}
-                variant="feed"
-              />
-            ))}
+            {postsLoading ? (
+              <LoadingSkeleton />
+            ) : posts.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-gray-200 px-4 py-10 text-center dark:border-gray-800">
+                <p className="text-sm text-gray-500 dark:text-gray-400">No posts yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {posts.map((post) => (
+                  <PostCard
+                    key={post.id}
+                    post={post}
+                    unlocking={unlockingId === post.id}
+                    onUnlock={() => void unlockPost(post.id)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-          <div className="hidden md:grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {papers.map((p) => (
-              <PaperCard
-                key={p.id}
-                id={p.id}
-                title={p.title}
-                program={p.program}
-                type={p.type}
-                uploadedAt={p.uploadedAt}
-                uploaderName={name}
-                uploadedBy={params.id}
-                uploaderRole={role}
-                uploaderVerified={isVerified}
-              />
-            ))}
-          </div>
-        </>
-      )}
-
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 mt-8 px-0.5">Posts</h2>
-
-      {postsLoading ? (
-        <LoadingSkeleton />
-      ) : posts.length === 0 ? (
-        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-          <p className="text-sm">No posts yet</p>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {posts.map((post) => (
-            <PostCard
-              key={post.id}
-              post={post}
-              unlocking={unlockingId === post.id}
-              onUnlock={() => void unlockPost(post.id)}
-            />
-          ))}
-        </div>
-      )}
+      </section>
     </div>
   );
 }

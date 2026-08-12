@@ -1,5 +1,11 @@
 {
   "dependencies": {
-    "@supabase/supabase-js": "^2.96.0"
+    "@supabase/supabase-js": "^2.96.0",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.4.21"
+  }
+  ,
+  "scripts": {
+    "process-jobs": "node datacampus/scripts/process-jobs.js"
   }
 }

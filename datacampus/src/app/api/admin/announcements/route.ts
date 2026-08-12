@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
             kind: "announcement",
             title,
             body: announcementBody,
-            link: link || "/notifications",
+            link: link || "/inbox",
             data: { announcement_id: row.id, announcement_kind: kind },
           }));
           const { error: nErr } = await supabaseServer.from("notifications").insert(rows);

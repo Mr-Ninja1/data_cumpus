@@ -47,11 +47,12 @@ export async function POST(req: NextRequest) {
     user_id: user.id,
     kind: 'deposit',
     credits_delta: amount,
-    cash_amount: 0,
-    currency: 'TZS',
+    cash_amount_cents: 0,
+    currency: 'ZMW',
     status: 'completed',
     provider,
     reference: body.reference || null,
+    description: 'manual-deposit',
     metadata: { packageId, source: 'manual-deposit' },
   });
 

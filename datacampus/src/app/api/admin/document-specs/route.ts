@@ -5,7 +5,7 @@ import { supabaseServer } from '@/utils/supabaseServerClient';
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthedUser(req as any);
+  const user = await getAuthedUser(req);
   if (!user || !supabaseServer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   if (!(await assertStaffUser(user.id))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
@@ -15,17 +15,30 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getAuthedUser(req as any);
+  const user = await getAuthedUser(req);
   if (!user || !supabaseServer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   if (!(await assertStaffUser(user.id))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
-  const { key, title, description, spec_md, examples, is_public, approved } = body;
+  const { key, title, description, spec_md, spec_json, examples, is_public, approved } = body;
   if (!key || !title) return NextResponse.json({ error: 'Missing key or title' }, { status: 400 });
 
   const { data, error } = await supabaseServer
     .from('document_specs')
-    .upsert({ key, title, description: description || null, spec_md: spec_md || '', examples: examples || [], user_id: user.id, is_public: !!is_public, approved: !!approved }, { onConflict: 'key' })
+    .upsert(
+      {
+        key,
+        title,
+        description: description || null,
+        spec_md: spec_md || '',
+        spec_json: spec_json ?? null,
+        examples: examples || [],
+        user_id: user.id,
+        is_public: !!is_public,
+        approved: !!approved,
+      },
+      { onConflict: 'key' }
+    )
     .select()
     .single();
 

@@ -2,9 +2,10 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/utils/supabaseClient";
 import Auth from "./Auth";
-import { Upload, FileText, X, Check, AlertCircle, ChevronDown } from "lucide-react";
+import { Upload, FileText, X, Check, AlertCircle, ChevronDown, ShieldCheck } from "lucide-react";
 import { showToast } from "@/utils/toast";
 import { useProfile } from "@/hooks/useProfile";
+import { openVerifyPrompt } from "@/utils/verificationGate";
 
 const schools = [
 	{
@@ -32,7 +33,7 @@ const schools = [
 
 export default function UploadPaperForm() {
 	const [session, setSession] = useState<any>(null);
-	const { isTrusted } = useProfile();
+	const { isTrusted, canUseSocialFeatures, loading: profileLoading } = useProfile();
 
 	useEffect(() => {
 		let mounted = true;
@@ -185,6 +186,12 @@ export default function UploadPaperForm() {
 		if (!session) {
 			setMessage({ type: 'error', text: 'Please sign in before uploading.' });
 			showToast('error', 'Please sign in before uploading.');
+			return;
+		}
+		if (!canUseSocialFeatures) {
+			setMessage({ type: 'error', text: 'Verify your student status before uploading.' });
+			showToast('info', 'Verify your student status to upload');
+			openVerifyPrompt("upload");
 			return;
 		}
 
@@ -379,6 +386,27 @@ export default function UploadPaperForm() {
 		return (
 			<div className="max-w-xl mx-auto p-6">
 				<Auth />
+			</div>
+		);
+	}
+
+	if (!profileLoading && !canUseSocialFeatures) {
+		return (
+			<div className="mx-auto max-w-xl rounded-3xl border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-indigo-50 p-8 dark:border-sky-900/40 dark:from-sky-950/40 dark:via-gray-900 dark:to-indigo-950/30">
+				<div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/15 text-sky-600 dark:text-sky-400">
+					<ShieldCheck size={22} />
+				</div>
+				<h2 className="text-xl font-bold text-gray-900 dark:text-gray-50">Verify to upload</h2>
+				<p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+					You can browse papers freely. Uploading materials requires a verified student account — scan your ZICTC ID to unlock creator access.
+				</p>
+				<button
+					type="button"
+					onClick={() => openVerifyPrompt("upload")}
+					className="mt-6 rounded-full bg-sky-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-sky-400"
+				>
+					Verify student status
+				</button>
 			</div>
 		);
 	}

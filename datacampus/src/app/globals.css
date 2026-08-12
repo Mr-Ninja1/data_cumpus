@@ -103,6 +103,8 @@ body {
   font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   line-height: 1.55;
   letter-spacing: -0.0125em;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 html.dark body {
@@ -148,15 +150,19 @@ html.dark body {
     transform var(--transition-fast);
 }
 
-/* Spacing scale */
+/* Spacing scale:
+   Do NOT register --spacing-{sm,md,lg,xl,2xl,3xl} in @theme.
+   In Tailwind v4 those names are shared with max-w-*, so
+   --spacing-md: 1rem makes max-w-md only 16px wide (skinny modals / one-word lines). */
+
+/* Explicit container widths so max-w-sm … max-w-3xl stay readable */
 @theme {
-  --spacing-xs: 0.25rem;
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 1.5rem;
-  --spacing-xl: 2rem;
-  --spacing-2xl: 3rem;
-  --spacing-3xl: 4rem;
+  --container-sm: 24rem;
+  --container-md: 28rem;
+  --container-lg: 32rem;
+  --container-xl: 36rem;
+  --container-2xl: 42rem;
+  --container-3xl: 48rem;
 }
 
 /* Border radius utilities */
@@ -240,6 +246,28 @@ html {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    opacity: 0.6;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

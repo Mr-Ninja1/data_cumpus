@@ -158,17 +158,17 @@ export default function WalletPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-3 md:px-0 space-y-6">
+    <div className="mx-auto w-full max-w-5xl space-y-6 px-3 py-8 md:px-0">
       <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-violet-100 p-3 text-violet-700"><Wallet size={20} /></div>
-            <div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div className="shrink-0 rounded-xl bg-violet-100 p-3 text-violet-700"><Wallet size={20} /></div>
+            <div className="min-w-0 flex-1">
               <h1 className="text-2xl font-semibold">Wallet</h1>
               <p className="text-sm text-gray-600">Spend credits on AI proposals and other premium actions.</p>
             </div>
           </div>
-          <button onClick={depositCredits} className="rounded-full bg-gray-900 px-4 py-2 text-sm font-semibold text-white">Top up credits</button>
+          <button onClick={depositCredits} className="shrink-0 self-start rounded-full bg-gray-900 px-4 py-2 text-sm font-semibold text-white sm:self-auto">Top up credits</button>
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-[1.2fr_0.8fr]">

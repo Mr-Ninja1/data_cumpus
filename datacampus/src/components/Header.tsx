@@ -1,11 +1,12 @@
 "use client";
 import React, { useEffect, useState, useRef } from "react";
-import { Search, Upload, User, Menu, Shield, Bell, Plus, Wallet as WalletIcon } from "lucide-react";
+import { Search, User, Menu, Shield, Bell, Plus, Wallet as WalletIcon } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
 import { useRouter, usePathname } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile";
 import { useNotifications } from "@/hooks/useNotifications";
 import VerifiedBadge from "@/components/VerifiedBadge";
+import BrandLogo from "@/components/BrandLogo";
 
 export default function Header() {
   const router = useRouter();
@@ -89,9 +90,7 @@ export default function Header() {
     return (
       <header className="hidden md:flex items-center justify-between px-6 py-3 border-b bg-white dark:bg-gray-900 sticky top-0 z-30">
         <div onClick={() => router.push("/")} className="flex items-center gap-2 cursor-pointer">
-          <span className="font-extrabold text-2xl bg-gradient-to-r from-red-600 to-rose-600 bg-clip-text text-transparent">
-            DataCampus
-          </span>
+          <BrandLogo size="md" />
         </div>
         <form
           className="relative flex-1 max-w-2xl mx-8"
@@ -127,12 +126,12 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-30 bg-white dark:bg-gray-950 border-b border-gray-200/80 dark:border-gray-800">
-      {/* YouTube-like mobile top bar */}
-      <div className="flex md:hidden items-center justify-between h-12 px-2">
+      {/* Mobile top bar — brand + wallet only (chat lives in tab bar) */}
+      <div className="flex md:hidden h-12 items-center justify-between px-2">
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent("toggle-mobile-sidebar"))}
-          className="p-2 rounded-full active:bg-gray-100 dark:active:bg-gray-800"
+          className="rounded-full p-2 active:bg-gray-100 dark:active:bg-gray-800"
           aria-label="Menu"
         >
           <Menu size={22} strokeWidth={1.75} />
@@ -141,22 +140,17 @@ export default function Header() {
         <button
           type="button"
           onClick={() => router.push("/")}
-          className="flex items-center gap-1.5 min-w-0"
+          className="flex min-w-0 items-center gap-1.5"
         >
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-red-600 text-white text-[11px] font-black">
-            DC
-          </span>
-          <span className="font-semibold text-[18px] tracking-tight text-gray-900 dark:text-white truncate">
-            DataCampus
-          </span>
+          <BrandLogo size="sm" />
         </button>
 
-        <div className="flex items-center">
+        <div className="flex items-center gap-0.5">
           {isStaff && (
             <button
               type="button"
               onClick={() => router.push("/admin")}
-              className="p-2 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 shadow-md shadow-amber-500/30 active:shadow-amber-500/50 mr-0.5"
+              className="p-2 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 shadow-md shadow-amber-500/30 active:shadow-amber-500/50"
               aria-label="Control Center"
             >
               <Shield size={18} strokeWidth={2} />
@@ -164,43 +158,15 @@ export default function Header() {
           )}
           <button
             type="button"
-            onClick={() => router.push("/notifications")}
-            className="relative p-2 rounded-full active:bg-gray-100 dark:active:bg-gray-800"
-            aria-label="Notifications"
+            onClick={() => router.push("/wallet")}
+            className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1.5 active:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:active:bg-gray-800"
+            aria-label="Wallet"
+            title="Wallet"
           >
-            <Bell size={22} strokeWidth={1.75} />
-            {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center">
-                {unreadCount > 9 ? "9+" : unreadCount}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push("/search")}
-            className="p-2 rounded-full active:bg-gray-100 dark:active:bg-gray-800"
-            aria-label="Search"
-          >
-            <Search size={22} strokeWidth={1.75} />
-          </button>
-          <button
-            type="button"
-            onClick={handleProfileClick}
-            className="p-1.5 rounded-full"
-            aria-label={user ? "You" : "Sign in"}
-          >
-            {user?.user_metadata?.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={user.user_metadata.avatar_url}
-                alt=""
-                className="h-7 w-7 rounded-full object-cover"
-              />
-            ) : (
-              <div className="h-7 w-7 rounded-full bg-sky-600 text-white flex items-center justify-center text-[11px] font-bold">
-                {user ? (user.email?.[0] || "U").toUpperCase() : <User size={14} />}
-              </div>
-            )}
+            <WalletIcon size={15} strokeWidth={1.75} />
+            <span className="text-[13px] font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+              {walletBalance !== null ? walletBalance : "—"}
+            </span>
           </button>
         </div>
       </div>
@@ -216,12 +182,7 @@ export default function Header() {
             <Menu size={22} />
           </button>
           <div onClick={() => router.push("/")} className="flex items-center gap-2 cursor-pointer min-w-0">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-cyan-500 text-white text-xs font-black shadow-sm">
-              DC
-            </span>
-            <span className="font-semibold text-xl tracking-tight text-gray-900 dark:text-white">
-              DataCampus
-            </span>
+            <BrandLogo size="md" />
           </div>
         </div>
 
@@ -280,8 +241,8 @@ export default function Header() {
             <span>{walletBalance !== null ? walletBalance : '—'}</span>
           </button>
           <button
-            onClick={() => router.push("/notifications")}
-            title="Notifications"
+            onClick={() => router.push("/inbox")}
+            title="Inbox"
             className="relative p-2.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
           >
             <Bell size={22} />
@@ -312,7 +273,7 @@ export default function Header() {
                   <span className="truncate">{user.email}</span>
                   <VerifiedBadge role={role} isVerified={isVerified} size="sm" className="ml-1" />
                 </div>
-                <button onClick={() => router.push("/notifications")} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2">
+                <button onClick={() => router.push("/inbox")} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2">
                   <Bell size={14} /> Inbox
                   {unreadCount > 0 && (
                     <span className="ml-auto text-xs bg-red-600 text-white px-1.5 py-0.5 rounded-full">{unreadCount}</span>

@@ -30,22 +30,31 @@ export async function GET(req: NextRequest) {
   });
 
   const senderIds = [...new Set(pending.map((m) => m.sender_id).filter(Boolean))];
-  const nameMap: Record<string, string> = {};
+  const profileMap: Record<string, { name: string; role: string | null; verified: boolean }> = {};
   if (senderIds.length) {
     const { data: profiles } = await supabaseServer
       .from('profiles')
-      .select('id, display_name, role, is_verified')
+      .select('id, display_name, role, is_verified, verification_status')
       .in('id', senderIds);
     for (const p of profiles || []) {
-      nameMap[p.id] = p.display_name || 'User';
+      profileMap[p.id] = {
+        name: p.display_name || 'User',
+        role: p.role || null,
+        verified: Boolean(p.is_verified) || p.verification_status === 'verified',
+      };
     }
   }
 
   return NextResponse.json({
-    requests: pending.map((m) => ({
-      ...m,
-      sender_name: nameMap[m.sender_id] || 'User',
-      fee_charged: (m.metadata as { fee_charged?: number } | null)?.fee_charged || 0,
-    })),
+    requests: pending.map((m) => {
+      const profile = profileMap[m.sender_id] || { name: 'User', role: null, verified: false };
+      return {
+        ...m,
+        sender_name: profile.name,
+        sender_role: profile.role,
+        sender_verified: profile.verified,
+        fee_charged: (m.metadata as { fee_charged?: number } | null)?.fee_charged || 0,
+      };
+    }),
   });
 }

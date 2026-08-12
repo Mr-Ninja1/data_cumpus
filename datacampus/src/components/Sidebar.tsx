@@ -2,11 +2,14 @@
 import React, { useState, useEffect } from "react";
 import { usePreferences } from "@/hooks/usePreferences";
 import { Home, X, GraduationCap, BookOpen, Upload, User, LogIn, LogOut, ChevronRight, ShieldCheck, Wallet, FilePlus2, Shield, Users } from "lucide-react";
-import { Bell, Inbox, Search } from "lucide-react";
+import { Inbox, Search } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 import { bumpInterest } from "@/utils/interests";
 import { useProfile } from "@/hooks/useProfile";
+import { useMessages } from "@/hooks/useMessages";
+import { useNotifications } from "@/hooks/useNotifications";
+import { useChatSocial } from "@/hooks/useChatSocial";
 
 const categories = [
   {
@@ -62,6 +65,10 @@ export default function Sidebar() {
   const { preferences, setPreferences } = usePreferences();
   const [user, setUser] = useState<any>(null);
   const { isStaff } = useProfile();
+  const { unreadCount: messageUnread } = useMessages();
+  const { unreadCount: notificationUnread } = useNotifications();
+  const { incoming } = useChatSocial();
+  const inboxBadge = messageUnread + notificationUnread + incoming.length;
 
   // On mount, read persisted sidebar state; do this in effect to avoid
   // hydration mismatch between server and client renders.
@@ -175,13 +182,12 @@ export default function Sidebar() {
               ...(isStaff ? [{ href: "/admin", label: "Control Center", icon: Shield, staff: true }] : []),
               { href: "/", label: "Home", icon: Home },
               { href: "/search", label: "Explore", icon: Search },
-              { href: "/people", label: "People", icon: Users },
-              { href: "/inbox", label: "Inbox", icon: Inbox },
-              { href: "/notifications", label: "Updates", icon: Bell },
+              { href: "/people", label: "People", icon: Users, badge: messageUnread },
+              { href: "/inbox", label: "Inbox", icon: Inbox, badge: inboxBadge },
               { href: "/upload", label: "Upload", icon: Upload },
               { href: "/verify", label: "Verify", icon: ShieldCheck },
               { href: "/wallet", label: "Wallet", icon: Wallet },
-              { href: "/workspace/proposals", label: "Proposals", icon: FilePlus2 },
+              { href: "/workspace", label: "Workspace", icon: FilePlus2 },
               { href: "/profile", label: "Profile", icon: User },
             ].map((item) => {
               const Icon = item.icon;
@@ -190,6 +196,7 @@ export default function Sidebar() {
                   ? pathname === "/"
                   : pathname === item.href || pathname.startsWith(item.href + "/");
               const isControlCenter = Boolean((item as { staff?: boolean }).staff);
+              const badge = typeof (item as { badge?: number }).badge === "number" ? (item as { badge?: number }).badge! : 0;
               return (
                 <button
                   key={item.href}
@@ -216,11 +223,20 @@ export default function Sidebar() {
                         <Icon size={17} />
                       </span>
                       <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>
+                      {badge > 0 && (
+                        <span className="ml-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                          {badge > 9 ? "9+" : badge}
+                        </span>
+                      )}
                     </span>
                   ) : (
-                    <span className="flex flex-col items-center justify-center gap-1 px-1 py-3 rounded-xl w-full text-[11px] font-medium">
+                    <span className="relative inline-flex w-full items-center justify-center py-2.5">
                       <Icon size={20} />
-                      <span className="leading-none">{item.label}</span>
+                      {badge > 0 && (
+                        <span className="absolute right-2 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold text-white">
+                          {badge > 9 ? "9+" : badge}
+                        </span>
+                      )}
                     </span>
                   )}
                 </button>
@@ -344,70 +360,71 @@ export default function Sidebar() {
                   setMobileOpen(false);
                   router.push("/upload");
                 }}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-3 py-2.5 text-sm font-semibold text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900"
               >
-                <Upload className="w-4 h-4" />
-                Upload
+                <Upload className="h-4 w-4" />
+                Upload paper
               </button>
               {user ? (
                 <button
                   type="button"
                   onClick={handleSignOut}
-                  className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium transition-colors"
+                  className="inline-flex items-center justify-center rounded-xl bg-gray-100 px-3 py-2.5 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  aria-label="Sign out"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="h-4 w-4" />
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={handleSignIn}
-                  className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium transition-colors"
+                  className="inline-flex items-center justify-center rounded-xl bg-gray-100 px-3 py-2.5 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  aria-label="Sign in"
                 >
-                  <LogIn className="w-4 h-4" />
+                  <LogIn className="h-4 w-4" />
                 </button>
               )}
             </div>
           </div>
 
-          {/* Primary navigation (YouTube-like) */}
+          {/* Extras not in the tab bar */}
           <div className="pt-3">
-            <div className="px-4 text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold mb-2">
-              Menu
+            <div className="mb-2 px-4 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              More
             </div>
             <div className="space-y-1">
               <button
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                type="button"
+                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                 onClick={() => {
                   setMobileOpen(false);
-                  router.push("/");
+                  router.push("/inbox");
                 }}
               >
-                <Home size={18} />
-                <span className="text-sm font-medium">Home</span>
+                <Inbox size={18} />
+                <span className="text-sm font-medium">Inbox</span>
               </button>
               <button
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                type="button"
+                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
                 onClick={() => {
                   setMobileOpen(false);
-                  router.push("/upload");
+                  router.push("/workspace");
                 }}
               >
-                <Upload size={18} />
-                <span className="text-sm font-medium">Upload</span>
+                <FilePlus2 size={18} />
+                <span className="text-sm font-medium">Workspace</span>
               </button>
               <button
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                onClick={async () => {
-                  if (!user) {
-                    await handleSignIn();
-                    return;
-                  }
+                type="button"
+                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
+                onClick={() => {
                   setMobileOpen(false);
-                  router.push("/profile");
+                  router.push("/wallet");
                 }}
               >
-                <User size={18} />
-                <span className="text-sm font-medium">Profile</span>
+                <Wallet size={18} />
+                <span className="text-sm font-medium">Wallet</span>
               </button>
             </div>
           </div>

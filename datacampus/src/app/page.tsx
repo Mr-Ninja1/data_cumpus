@@ -11,6 +11,7 @@ import VerifiedBadge from "@/components/VerifiedBadge";
 import { usePreferences } from "@/hooks/usePreferences";
 import { softRankPapers, topInterestPrograms } from "@/utils/interests";
 import { fetchFollowingIds } from "@/hooks/useFollow";
+import { enrichEngagement, mapPaperRow, attachUploaders } from "@/utils/engagement";
 import { Bell, FileText, Sparkles, SlidersHorizontal } from "lucide-react";
 
 interface SpotlightProfile {
@@ -47,6 +48,8 @@ interface Paper {
   uploaderName?: string | null;
   uploaderRole?: string | null;
   uploaderVerified?: boolean | null;
+  viewCount?: number;
+  likeCount?: number;
 }
 
 export default function HomePage() {
@@ -59,7 +62,13 @@ export default function HomePage() {
   const [showDesktopFilters, setShowDesktopFilters] = useState(false);
   const [subscriptionFeed, setSubscriptionFeed] = useState<Paper[]>([]);
   const [spotlightProfiles, setSpotlightProfiles] = useState<SpotlightProfile[]>([]);
+  const [interestPrograms, setInterestPrograms] = useState<string[]>([]);
   const { preferences } = usePreferences();
+
+  // Defer localStorage-backed chips until after mount to avoid SSR hydration mismatch.
+  useEffect(() => {
+    setInterestPrograms(topInterestPrograms(3));
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -94,46 +103,9 @@ export default function HomePage() {
         console.error("Error fetching papers:", error.message);
         setPapers([]);
       } else if (data) {
-        const mapped = data.map(
-          (row: any) =>
-            ({
-              id: row.id,
-              school: row.school,
-              program: row.program,
-              type: row.type,
-              title: row.title,
-              fileUrl: row.file_url,
-              uploadedAt: row.uploaded_at,
-              uploadedBy: row.uploaded_by ?? null,
-              uploaderName: null as string | null,
-              uploaderRole: null as string | null,
-              uploaderVerified: null as boolean | null,
-            }) as Paper
-        );
-
-        const uploaderIds = [...new Set(mapped.map((p) => p.uploadedBy).filter(Boolean) as string[])];
-        if (uploaderIds.length) {
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, display_name, role, is_verified")
-            .in("id", uploaderIds);
-          const nameMap: Record<string, string> = {};
-          const roleMap: Record<string, string | null> = {};
-          const verifiedMap: Record<string, boolean | null> = {};
-          for (const p of profiles || []) {
-            nameMap[p.id] = p.display_name || "Uploader";
-            roleMap[p.id] = p.role ?? null;
-            verifiedMap[p.id] = p.is_verified ?? null;
-          }
-          for (const paper of mapped) {
-            if (paper.uploadedBy && nameMap[paper.uploadedBy]) {
-              paper.uploaderName = nameMap[paper.uploadedBy];
-              paper.uploaderRole = roleMap[paper.uploadedBy] ?? null;
-              paper.uploaderVerified = verifiedMap[paper.uploadedBy] ?? null;
-            }
-          }
-        }
-
+        let mapped = data.map((row: any) => mapPaperRow(row) as Paper);
+        mapped = await attachUploaders(mapped);
+        mapped = await enrichEngagement(mapped);
         setPapers(mapped);
       }
       setLoading(false);
@@ -164,46 +136,9 @@ export default function HomePage() {
         return;
       }
 
-      const mapped = data.map(
-        (row: any) =>
-          ({
-            id: row.id,
-            school: row.school,
-            program: row.program,
-            type: row.type,
-            title: row.title,
-            fileUrl: row.file_url,
-            uploadedAt: row.uploaded_at,
-            uploadedBy: row.uploaded_by ?? null,
-            uploaderName: null as string | null,
-            uploaderRole: null as string | null,
-            uploaderVerified: null as boolean | null,
-          }) as Paper
-      );
-
-      const uploaderIds = [...new Set(mapped.map((p) => p.uploadedBy).filter(Boolean) as string[])];
-      if (uploaderIds.length) {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, display_name, role, is_verified")
-          .in("id", uploaderIds);
-        const nameMap: Record<string, string> = {};
-        const roleMap: Record<string, string | null> = {};
-        const verifiedMap: Record<string, boolean | null> = {};
-        for (const p of profiles || []) {
-          nameMap[p.id] = p.display_name || "Uploader";
-          roleMap[p.id] = p.role ?? null;
-          verifiedMap[p.id] = p.is_verified ?? null;
-        }
-        for (const paper of mapped) {
-          if (paper.uploadedBy && nameMap[paper.uploadedBy]) {
-            paper.uploaderName = nameMap[paper.uploadedBy];
-            paper.uploaderRole = roleMap[paper.uploadedBy] ?? null;
-            paper.uploaderVerified = verifiedMap[paper.uploadedBy] ?? null;
-          }
-        }
-      }
-
+      let mapped = data.map((row: any) => mapPaperRow(row) as Paper);
+      mapped = await attachUploaders(mapped);
+      mapped = await enrichEngagement(mapped);
       setSubscriptionFeed(mapped);
     })();
     return () => {
@@ -257,7 +192,7 @@ export default function HomePage() {
             );
           })}
           {/* Optional interest / prefs chips — never auto-applied */}
-          {[...(preferences?.program ? [preferences.program] : []), ...topInterestPrograms(2)]
+          {[...(preferences?.program ? [preferences.program] : []), ...interestPrograms.slice(0, 2)]
             .filter((v, i, arr) => arr.indexOf(v) === i)
             .map((prog) => (
               <button
@@ -284,7 +219,7 @@ export default function HomePage() {
             { id: "exam", label: "Exams", onClick: () => setSelectedType(selectedType === "Exam" ? "" : "Exam") },
             { id: "test", label: "Tests", onClick: () => setSelectedType(selectedType === "Test" ? "" : "Test") },
             { id: "material", label: "Materials", onClick: () => setSelectedType(selectedType === "Material" ? "" : "Material") },
-            ...[...(preferences?.program ? [preferences.program] : []), ...topInterestPrograms(3)]
+            ...[...(preferences?.program ? [preferences.program] : []), ...interestPrograms]
               .filter((v, i, arr) => arr.indexOf(v) === i)
               .map((prog) => ({
                 id: `prog:${prog}`,
@@ -386,6 +321,8 @@ export default function HomePage() {
                     uploadedBy={paper.uploadedBy}
                     uploaderRole={paper.uploaderRole}
                     uploaderVerified={paper.uploaderVerified}
+                    viewCount={paper.viewCount}
+                    likeCount={paper.likeCount}
                     variant="feed"
                   />
                 ))}
@@ -404,6 +341,8 @@ export default function HomePage() {
                     uploadedBy={paper.uploadedBy}
                     uploaderRole={paper.uploaderRole}
                     uploaderVerified={paper.uploaderVerified}
+                    viewCount={paper.viewCount}
+                    likeCount={paper.likeCount}
                   />
                 ))}
               </div>
@@ -473,6 +412,8 @@ export default function HomePage() {
                         uploadedBy={paper.uploadedBy}
                         uploaderRole={paper.uploaderRole}
                         uploaderVerified={paper.uploaderVerified}
+                        viewCount={paper.viewCount}
+                        likeCount={paper.likeCount}
                         variant="shorts"
                       />
                     </div>
@@ -495,6 +436,8 @@ export default function HomePage() {
                   uploadedBy={paper.uploadedBy}
                   uploaderRole={paper.uploaderRole}
                   uploaderVerified={paper.uploaderVerified}
+                  viewCount={paper.viewCount}
+                  likeCount={paper.likeCount}
                   variant="feed"
                 />
               ))}
@@ -517,6 +460,8 @@ export default function HomePage() {
                   uploadedBy={paper.uploadedBy}
                   uploaderRole={paper.uploaderRole}
                   uploaderVerified={paper.uploaderVerified}
+                  viewCount={paper.viewCount}
+                  likeCount={paper.likeCount}
                 />
               ))}
             </div>

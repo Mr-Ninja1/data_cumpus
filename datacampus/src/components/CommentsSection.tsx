@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Flag, Loader2, MessageCircle, Reply, Send, Trash2, EyeOff } from "lucide-react";
+import { Flag, Loader2, MessageCircle, Reply, Send, Trash2, EyeOff, X, ChevronDown } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
 import { useProfile } from "@/hooks/useProfile";
 import { showToast } from "@/utils/toast";
+import { openVerifyPrompt } from "@/utils/verificationGate";
 import ReportModal from "@/components/ReportModal";
 import VerifiedBadge from "@/components/VerifiedBadge";
 
@@ -77,7 +78,7 @@ function nestComments(rows: CommentRow[]): CommentRow[] {
 }
 
 export default function CommentsSection({ paperId, paperTitle }: Props) {
-  const { userId, isStaff } = useProfile();
+  const { userId, isStaff, canUseSocialFeatures } = useProfile();
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [body, setBody] = useState("");
@@ -86,6 +87,16 @@ export default function CommentsSection({ paperId, paperTitle }: Props) {
   const [replyBody, setReplyBody] = useState("");
   const [replyPosting, setReplyPosting] = useState(false);
   const [reportCommentId, setReportCommentId] = useState<string | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileOpen]);
 
   const attachNames = async (rows: CommentRow[]): Promise<CommentRow[]> => {
     const userIds = [...new Set(rows.map((r) => r.user_id))];
@@ -158,6 +169,11 @@ export default function CommentsSection({ paperId, paperTitle }: Props) {
       await supabase.auth.signInWithOAuth({ provider: "google" });
       return;
     }
+    if (!canUseSocialFeatures) {
+      showToast("info", "Verify your student status to comment");
+      openVerifyPrompt("comment");
+      return;
+    }
 
     setPosting(true);
     try {
@@ -188,6 +204,11 @@ export default function CommentsSection({ paperId, paperTitle }: Props) {
     if (!userId) {
       showToast("info", "Sign in to reply");
       await supabase.auth.signInWithOAuth({ provider: "google" });
+      return;
+    }
+    if (!canUseSocialFeatures) {
+      showToast("info", "Verify your student status to comment");
+      openVerifyPrompt("comment");
       return;
     }
 
@@ -366,103 +387,191 @@ export default function CommentsSection({ paperId, paperTitle }: Props) {
     );
   };
 
+  const top = comments[0];
+
+  const composer = (
+    <>
+      {userId && !canUseSocialFeatures && (
+        <button
+          type="button"
+          onClick={() => openVerifyPrompt("comment")}
+          className="mb-4 w-full rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-left text-sm text-sky-900 transition hover:bg-sky-100 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-100 dark:hover:bg-sky-950/60"
+        >
+          <span className="font-semibold">Verify your student status</span>
+          <span className="mt-0.5 block text-xs opacity-80">
+            Comments are unlocked after you verify with your ZICTC ID.
+          </span>
+        </button>
+      )}
+
+      <div className="mb-6 flex gap-2">
+        <input
+          type="text"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && !posting && void postComment()}
+          placeholder={
+            !userId
+              ? "Sign in to comment"
+              : !canUseSocialFeatures
+                ? "Verify to comment…"
+                : "Add a comment…"
+          }
+          maxLength={2000}
+          className="flex-1 rounded-full border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900"
+        />
+        <button
+          type="button"
+          disabled={posting || !body.trim()}
+          onClick={() => void postComment()}
+          className="rounded-full bg-indigo-600 p-2.5 text-white hover:bg-indigo-700 disabled:opacity-50"
+          aria-label="Post comment"
+        >
+          {posting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+        </button>
+      </div>
+    </>
+  );
+
+  const list = loading ? (
+    <div className="py-8 text-center text-sm text-gray-500">Loading comments…</div>
+  ) : comments.length === 0 ? (
+    <p className="py-4 text-sm text-gray-500 dark:text-gray-400">
+      No comments yet. Be the first to discuss{paperTitle ? ` “${paperTitle}”` : ""}.
+    </p>
+  ) : (
+    <ul className="space-y-4">
+      {comments.map((c) => (
+        <li key={c.id} className="flex gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+            {(c.author_name || "?")[0]?.toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {c.author_name}
+                <VerifiedBadge role={c.author_role} isVerified={c.author_verified} size="xs" className="ml-0.5" />
+              </span>
+              <span className="text-xs text-gray-400">{relativeTime(c.created_at)}</span>
+              {c.is_hidden && isStaff && (
+                <span className="text-[10px] uppercase tracking-wide text-amber-600">hidden</span>
+              )}
+            </div>
+            <p className="mt-0.5 break-words whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-200">
+              {c.body}
+            </p>
+            {renderActions(c, false)}
+            {renderReplyBox(c.id)}
+
+            {(c.replies?.length ?? 0) > 0 && (
+              <ul className="mt-3 space-y-3 border-l-2 border-gray-100 pl-3 dark:border-gray-800">
+                {c.replies!.map((r) => (
+                  <li key={r.id} className="flex gap-2.5">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[10px] font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                      {(r.author_name || "?")[0]?.toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {r.author_name}
+                          <VerifiedBadge role={r.author_role} isVerified={r.author_verified} size="xs" className="ml-0.5" />
+                        </span>
+                        <span className="text-xs text-gray-400">{relativeTime(r.created_at)}</span>
+                      </div>
+                      <p className="mt-0.5 break-words whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-200">
+                        {r.body}
+                      </p>
+                      {renderActions(r, true)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+
   return (
-    <section className="bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800">
-      <div className="px-3 lg:px-6 py-4 max-w-3xl">
-        <div className="flex items-center gap-2 mb-4">
-          <MessageCircle className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+    <section className="bg-transparent">
+      {/* Mobile: YouTube-style teaser under description — opens sheet (not below Up next) */}
+      <div className="md:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="mt-3 w-full rounded-xl bg-gray-100 px-3 py-3 text-left transition-colors active:bg-gray-200 dark:bg-gray-900 dark:active:bg-gray-800"
+        >
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-900 dark:text-gray-50">
+              Comments {loading ? "" : totalCount > 0 ? totalCount : ""}
+            </span>
+            <ChevronDown size={18} className="text-gray-500" />
+          </div>
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : top ? (
+            <div className="flex items-start gap-2">
+              <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                {(top.author_name || "?")[0]?.toUpperCase()}
+              </div>
+              <p className="line-clamp-2 text-sm text-gray-700 dark:text-gray-300">
+                <span className="font-medium text-gray-900 dark:text-gray-100">
+                  {top.author_name}
+                </span>{" "}
+                {top.body}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 dark:text-gray-400">Tap to add a comment</p>
+          )}
+        </button>
+
+        {mobileOpen && (
+          <div className="fixed inset-0 z-[70] flex flex-col justify-end md:hidden">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/50"
+              aria-label="Close comments"
+              onClick={() => setMobileOpen(false)}
+            />
+            <div className="relative z-10 flex max-h-[85vh] flex-col rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] dark:bg-gray-950">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-900">
+                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-50">
+                  Comments {totalCount > 0 ? totalCount : ""}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setMobileOpen(false)}
+                  className="rounded-full p-2 active:bg-gray-100 dark:active:bg-gray-800"
+                  aria-label="Close"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="overflow-y-auto px-4 py-3">
+                {composer}
+                {list}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Desktop: full comments under player */}
+      <div className="hidden py-4 md:block">
+        <div className="mb-4 flex items-center gap-2">
+          <MessageCircle className="h-5 w-5 text-gray-700 dark:text-gray-300" />
           <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
             Comments {totalCount > 0 ? `(${totalCount})` : ""}
           </h3>
         </div>
-
-        <div className="flex gap-2 mb-6">
-          <input
-            type="text"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !posting && void postComment()}
-            placeholder={userId ? "Add a comment…" : "Sign in to comment"}
-            maxLength={2000}
-            className="flex-1 px-3 py-2.5 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-          <button
-            type="button"
-            disabled={posting || !body.trim()}
-            onClick={() => void postComment()}
-            className="p-2.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
-            aria-label="Post comment"
-          >
-            {posting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="py-8 text-center text-sm text-gray-500">Loading comments…</div>
-        ) : comments.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400 py-4">
-            No comments yet. Be the first to discuss{paperTitle ? ` “${paperTitle}”` : ""}.
-          </p>
-        ) : (
-          <ul className="space-y-4">
-            {comments.map((c) => (
-              <li key={c.id} className="flex gap-3">
-                <div className="h-9 w-9 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center text-xs font-bold text-indigo-700 dark:text-indigo-300 shrink-0">
-                  {(c.author_name || "?")[0]?.toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center">
-                      {c.author_name}
-                      <VerifiedBadge role={c.author_role} isVerified={c.author_verified} size="xs" className="ml-0.5" />
-                    </span>
-                    <span className="text-xs text-gray-400">{relativeTime(c.created_at)}</span>
-                    {c.is_hidden && isStaff && (
-                      <span className="text-[10px] uppercase tracking-wide text-amber-600">hidden</span>
-                    )}
-                  </div>
-                  <p className="text-sm text-gray-800 dark:text-gray-200 mt-0.5 whitespace-pre-wrap break-words">
-                    {c.body}
-                  </p>
-                  {renderActions(c, false)}
-                  {renderReplyBox(c.id)}
-
-                  {(c.replies?.length ?? 0) > 0 && (
-                    <ul className="mt-3 space-y-3 border-l-2 border-gray-100 dark:border-gray-800 pl-3">
-                      {c.replies!.map((r) => (
-                        <li key={r.id} className="flex gap-2.5">
-                          <div className="h-7 w-7 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-600 dark:text-gray-300 shrink-0">
-                            {(r.author_name || "?")[0]?.toUpperCase()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center">
-                                {r.author_name}
-                                <VerifiedBadge role={r.author_role} isVerified={r.author_verified} size="xs" className="ml-0.5" />
-                              </span>
-                              <span className="text-xs text-gray-400">{relativeTime(r.created_at)}</span>
-                            </div>
-                            <p className="text-sm text-gray-800 dark:text-gray-200 mt-0.5 whitespace-pre-wrap break-words">
-                              {r.body}
-                            </p>
-                            {renderActions(r, true)}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        {composer}
+        {list}
       </div>
 
       {reportCommentId && (
-        <ReportModal
-          commentId={reportCommentId}
-          onClose={() => setReportCommentId(null)}
-        />
+        <ReportModal commentId={reportCommentId} onClose={() => setReportCommentId(null)} />
       )}
     </section>
   );

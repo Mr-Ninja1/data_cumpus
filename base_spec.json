@@ -1,0 +1,134 @@
+{
+  "doc_type": "project_proposal",
+  "program_scope": "ZICTC College — School of Information and Communication Technology (IT / Software Engineering final year projects)",
+  "source": "ZUT_IT_Final_Year_Proposal_Structure_Guide.pdf (extracted, single pass — see extraction notes at end of file)",
+
+  "stages": {
+    "initial_proposal": {
+      "chapters": [1, 2, 3],
+      "front_matter": ["cover_page", "table_of_contents"],
+      "back_matter": ["references"],
+      "required_diagrams": ["conceptual_framework"]
+    },
+    "full_project": {
+      "chapters": [1, 2, 3, 4, 5, 6],
+      "front_matter": ["cover_page", "abstract", "acknowledgement", "table_of_contents"],
+      "back_matter": ["references", "appendices"],
+      "required_diagrams": [
+        "conceptual_framework",
+        "contextual_model",
+        "use_case_model",
+        "sequence_diagram",
+        "state_machine_diagram",
+        "activity_diagram",
+        "class_diagram"
+      ]
+    }
+  },
+
+  "citation_style": "numbered_bracket (e.g. [3], [2]) — confirmed from real example, not APA/MLA author-year",
+  "logo_asset_note": "The ZICTC/ZUT logo is a full lockup — shield mark + institution wordmark + tagline combined as one image unit, not separate elements to be laid out individually. Store and embed as a single asset (Section 3 of main guidance doc).",
+
+  "chapters": [
+    {
+      "chapter": 1,
+      "title": "Introduction",
+      "sections": [
+        { "number": "1.1", "title": "Background of the Study", "description": "General introduction to the subject matter; context and background; engages reader interest and establishes initial sense of the research's importance and relevance.", "correction_note": "Generic guide called this 'Introduction' — confirmed real title is 'Background of the Study' from actual example." },
+        { "number": "1.2", "title": "Problem Statement", "description": "Concise, clear, focused articulation of the specific problem the research addresses and why it's worth investigating. Establishes the basis for the study." },
+        { "number": "1.3", "title": "Aim and Objectives", "description": "Restructured from generic guide's flat '1.3 Objectives' based on confirmed real example.",
+          "subsections": [
+            { "number": "1.3.1", "title": "Research Aim", "description": "The single overarching goal of the research, stated broadly." },
+            { "number": "1.3.2", "title": "Research Objectives", "description": "Specific, measurable goals that operationalize the aim; give clear direction and guide the research process." }
+          ]
+        },
+        { "number": "1.4", "title": "Research Questions", "description": "Specific inquiries the research intends to answer; must align with the problem statement and objectives." },
+        { "number": "1.5", "title": "Scope and Limitations", "description": "Scope: what the study covers (aspects, areas, time frames). Limitations: constraints/boundaries (data availability, time, resources)." },
+        { "number": "1.6", "title": "Significance of the Study", "description": "Why the study is relevant, who benefits, and how it contributes to existing knowledge or addresses real-world issues." },
+        {
+          "number": "1.7", "title": "Conceptual Framework",
+          "description": "Theoretical/conceptual basis the research is built on. IMPORTANT: subsections here are project-specific, not fixed — confirmed real example used 3 dynamic 'pillars' specific to that project (e.g. Security, Multi-Tenancy, Automation for a voting-system project). Generation must derive these pillars from the project's own title/description/objectives rather than using a fixed template list.",
+          "diagram": "conceptual_framework",
+          "dynamic_subsections": true,
+          "subsection_generation_rule": "Identify 2-4 core conceptual pillars/themes directly from the project's stated objectives and problem statement; title each subsection descriptively (e.g. '1.7.1 The [X] Pillar'); this should also directly inform the conceptual_framework diagram's structure (Section 13.4 of main guidance doc)."
+        },
+        { "number": "1.8", "title": "Organisation of the Report", "description": "Brief outline of the report's structure — how it's divided into chapters/sections, guiding the reader on what to expect." },
+        { "number": "1.9", "title": "Summary", "description": "Brief recap of the chapter's key points; smooth transition into subsequent chapters." }
+      ],
+      "required_inputs": ["project_title", "problem_area_description"]
+    },
+    {
+      "chapter": 2,
+      "title": "Literature Review",
+      "sections": [
+        { "number": "2.1", "title": "Introduction", "description": "Overview of the purpose and scope of the literature review; objectives, significance of the topic, and structure of the chapter." },
+        { "number": "2.2", "title": "Related Works", "description": "Comprehensive list of relevant sources/studies/articles related to the research topic; catalog of works reviewed for insight." },
+        {
+          "number": "2.3", "title": "Review of the Related Works",
+          "description": "Deeper synthesis and critical evaluation of key sources.",
+          "structure_pattern_confirmed_from_real_example": "One numbered subsection per theme/source cluster, each titled with a short descriptive theme name followed by an em-dash and the primary citation, e.g. '2.3.3 Security Challenges of an E-Voting System — Atuah et al. (2024)'. This is more specific than a generic flowing narrative — replicate this exact subsection pattern.",
+          "dynamic_subsections": true,
+          "subsection_generation_rule": "Derive subsections from the theme clusters produced in the literature-synthesis process (Section 13.1/13.2 of main guidance doc) — one subsection per cluster, titled '[theme] — [lead citation]'."
+        },
+        { "number": "2.4", "title": "Proposed System", "description": "Transition from reviewed literature to the researcher's own proposed system — research question, objectives, hypotheses, proposed approach/methods, expected contributions, and how it addresses gaps identified in 2.3." },
+        { "number": "2.5", "title": "Summary", "description": "Concise recap of key findings/insights from the literature review; reiterates significance and transitions to methodology." }
+      ],
+      "required_inputs": ["references"],
+      "notes": "Primary consumer of references.json. Follow Section 13's synthesis approach (decompose by angle, synthesize by theme, close with explicit gap statement in 2.3/2.4) — and use the confirmed 2.3.x subsection titling pattern above."
+    },
+    {
+      "chapter": 3,
+      "title": "Research Methodology",
+      "sections": [
+        { "number": "3.1", "title": "Introduction", "description": "Roadmap for the methodology underpinning the software development process; basis for how requirements are gathered, analyzed, and validated." },
+        { "number": "3.2", "title": "Software Development Methodology", "description": "The chosen methodology (Waterfall, Agile, etc.) and how it shapes the project's pace, flexibility, and requirements management approach." },
+        { "number": "3.3", "title": "Requirements Specification", "description": "Processes and techniques used to define, document, and validate requirements.",
+          "subsections": [
+            { "number": "3.3.1", "title": "Identify the Stakeholders", "description": "Identification of all relevant stakeholders influencing or affected by the software." },
+            { "number": "3.3.2", "title": "Requirements Gathering", "description": "Collection of information via interviews, surveys, workshops, etc." },
+            { "number": "3.3.3", "title": "Requirements Analysis", "description": "Breaking requirements into functional/non-functional categories and validating them.",
+              "subsections": [
+                { "number": "3.3.3.1", "title": "Functional Requirements", "description": "Specific features/behaviors the software must have — use cases, data models, user stories." },
+                { "number": "3.3.3.2", "title": "Non-Functional Requirements", "description": "Quality attributes — performance, security, scalability, usability." },
+                { "number": "3.3.3.4", "title": "Requirements Validation", "description": "Ensures requirements accurately reflect stakeholder needs and are free of inconsistencies.", "note": "CONFIRMED via real approved-pattern example: numbering skips 3.3.3.3 consistently (goes 3.3.3.1, 3.3.3.2, 3.3.3.4). This is a real, consistent house convention, not a one-off typo — replicate exactly, do not 'correct' to 3.3.3.3." }
+              ]
+            }
+          ]
+        },
+        { "number": "3.4", "title": "Summary", "description": "Recap of the methodology and requirements specification process." }
+      ],
+      "required_inputs": ["software_development_methodology", "target_stakeholders"],
+      "notes": "Heading depth reaches level 4 (e.g. 3.3.3.1) — see main guidance doc note on TOC display depth vs. heading structure depth."
+    }
+  ],
+
+  "later_stage_chapters_summary": [
+    {
+      "chapter": 4,
+      "title": "System Design and Implementation",
+      "sections": ["4.1 Introduction", "4.2 Architectural Design", "4.3 Software Design (4.3.1 Software Design Tools, 4.3.2 Component Design: 4.3.2.1 Contextual Model, 4.3.2.2 Use Case Model, 4.3.2.3 Sequence Diagram, 4.3.2.4 State Machine Diagram, 4.3.2.5 Activity Diagram, 4.3.2.6 Class Diagram)", "4.4 Software Development (4.4.1 Tools, 4.4.2 Component Development, 4.4.3 Evaluation and Testing Techniques)", "4.5 Deployment", "4.6 Summary"],
+      "diagrams": ["contextual_model", "use_case_model", "sequence_diagram", "state_machine_diagram", "activity_diagram", "class_diagram"],
+      "note": "Not required until full_project stage. Full per-section descriptions should be extracted into their own detailed spec block once this stage is being actively built — kept summarized here to avoid bloating the initial_proposal spec with unused detail."
+    },
+    {
+      "chapter": 5,
+      "title": "Results and Discussion",
+      "sections": ["5.1 Introduction", "5.2 Results", "5.3 Discussion", "5.4 Summary"],
+      "note": "Not required until full_project stage."
+    },
+    {
+      "chapter": 6,
+      "title": "Conclusion and Recommendation",
+      "sections": ["6.1 Introduction", "6.2 Conclusion", "6.3 Recommendation", "6.4 Summary"],
+      "note": "Not required until full_project stage. This chapter's own text notes it also encompasses References/Appendices placement at the end of the full document."
+    }
+  ],
+
+  "extraction_notes": [
+    "This spec was extracted from the admin-provided generic structure guide, THEN cross-checked and corrected against a real student proposal (cover page, hyperlinked TOC, and Chapter 1 opening confirmed) — see correction_note / structure_pattern_confirmed_from_real_example fields throughout for what changed and why.",
+    "The real example is authoritative where it fills gaps or corrects the generic guide's wording (1.1 title, 1.3 split into Aim/Objectives, 2.3 subsection pattern, 3.3.3.3 numbering skip, citation style). It should NOT be treated as infallible, since it's one student's own submitted work rather than a graded/approved reference — if more admin-approved examples are uploaded later, cross-check these corrections against them too before treating any single detail as permanently fixed.",
+    "Formatting details not fully covered yet (exact margins, spacing, heading font sizes) should still come from a dedicated formatting_rules extraction pass over one or more approved documents, per the main guidance doc's structure-source vs. style-source distinction.",
+    "If a future admin-uploaded example conflicts with this spec's REQUIRED STRUCTURE (chapter/section presence and order), this spec wins. Real examples may only override style/formatting/wording details, never remove or reorder required sections.",
+    "Chapter 4's diagram list (UML diagrams) should be reviewed against actual full_project-stage examples once that stage is being built — confirm with the school whether all six diagram types are mandatory per project or only the ones relevant to that project's design."
+  ]
+}

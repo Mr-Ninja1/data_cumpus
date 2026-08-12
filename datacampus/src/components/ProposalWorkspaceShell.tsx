@@ -1,30 +1,74 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
-import { AlertCircle, BookOpen, ChevronRight, FileText, FolderOpen, LayoutPanelLeft, Menu, Sparkles } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Eye,
+  FileText,
+  Loader2,
+  Menu,
+  Paperclip,
+  Send,
+  X,
+} from "lucide-react";
 import Link from "next/link";
+import ProposalCoverPagePreview, { type CoverPagePreviewProps } from "@/components/ProposalCoverPagePreview";
 
 type StatusTone = "pending" | "generating" | "awaiting_input" | "complete" | "failed";
+type AttachmentInfo = { path?: string; name?: string };
+type ChapterLike = { chapter_key: string; title?: string; content_md?: string };
+type ReferenceLike = {
+  id?: string;
+  title?: string;
+  author?: string;
+  year?: string | number | null;
+  journal?: string;
+  publisher?: string;
+  url?: string;
+};
+type ProposalLike = {
+  title?: string;
+  department?: string | null;
+  metadata?: { references?: ReferenceLike[]; title_refined?: boolean; original_title?: string | null } | null;
+};
+type MessageKind = "chat" | "status" | "milestone_full_project" | "clarification";
+type WorkspaceMessage = {
+  role: string;
+  text: string;
+  attachments?: AttachmentInfo[];
+  kind?: MessageKind;
+  chapterKey?: string;
+};
 
 type WorkspaceShellProps = {
-  project: any;
+  project: ProposalLike;
   currentStage: string;
   currentChapter: string;
-  chapterStore: any[];
+  chapterStore: ChapterLike[];
+  workflowMode?: "chat_to_work" | "classic";
+  coverPageData?: Omit<CoverPagePreviewProps, "extraNotes">;
   specKey: string;
   setSpecKey: (value: string) => void;
   pendingQuestion: string | null;
-  messages: Array<{ role: string; text: string; attachments?: any[] }>;
+  messages: WorkspaceMessage[];
   input: string;
   setInput: (value: string) => void;
   attachments: File[];
   onSend: () => void;
   onFileSelect: (event?: React.ChangeEvent<HTMLInputElement>) => void;
+  onOpenFilePicker: () => void;
   onSaveReferences: () => void;
   onSaveProject: () => void;
   onExport: () => void;
-  onStageChange: (value: string) => void;
+  onRevertTitle?: () => void;
   onSelectChapter: (value: string) => void;
+  initialProposalReady?: boolean;
+  onContinueToFullProject?: () => void;
+  continuingToFullProject?: boolean;
+  onFindReferences: () => void;
+  findingReferences: boolean;
+  referenceHelpMessage: string | null;
   referenceInput: string;
   setReferenceInput: (value: string) => void;
   saving: boolean;
@@ -33,284 +77,558 @@ type WorkspaceShellProps = {
   fileRef: React.RefObject<HTMLInputElement | null>;
   getStatus: (chapterKey: string) => StatusTone;
   getChapterLabel: (chapterKey: string) => string;
+  creditBalance?: number | null;
+  creditsCost?: number;
+  onTopUp?: () => void;
+  previewOpen: boolean;
+  previewChapterKey: string;
+  onOpenPreview: (key: string) => void;
+  onClosePreview: () => void;
 };
-
-const STAGE_OPTIONS = [
-  { value: "initial_proposal", label: "Initial proposal" },
-  { value: "full_project", label: "Full project" },
-];
 
 const STATUS_META: Record<StatusTone, { label: string; className: string }> = {
   pending: { label: "Pending", className: "bg-slate-100 text-slate-700" },
   generating: { label: "Generating", className: "bg-amber-100 text-amber-800" },
   awaiting_input: { label: "Awaiting input", className: "bg-rose-100 text-rose-800" },
-  complete: { label: "Complete", className: "bg-emerald-100 text-emerald-800" },
+  complete: { label: "Ready", className: "bg-emerald-100 text-emerald-800" },
   failed: { label: "Failed", className: "bg-red-100 text-red-800" },
 };
 
+function MessageBubble({
+  message,
+  onPreview,
+  onContinueToFullProject,
+  continuingToFullProject,
+}: {
+  message: WorkspaceMessage;
+  onPreview?: (key: string) => void;
+  onContinueToFullProject?: () => void;
+  continuingToFullProject?: boolean;
+}) {
+  const isUser = message.role === "user";
+
+  if (message.kind === "milestone_full_project") {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[92%] rounded-2xl border border-emerald-200 bg-emerald-50 p-3.5 text-sm text-emerald-900 sm:max-w-[80%]">
+          <div className="flex items-center gap-2 font-semibold">
+            <CheckCircle2 size={16} /> Initial proposal complete
+          </div>
+          <p className="mt-1.5">{message.text}</p>
+          {onContinueToFullProject ? (
+            <button
+              type="button"
+              onClick={onContinueToFullProject}
+              disabled={continuingToFullProject}
+              className="mt-3 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {continuingToFullProject ? <Loader2 size={13} className="animate-spin" /> : null}
+              {continuingToFullProject ? "Unlocking…" : "Continue to full project"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (message.kind === "clarification") {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[92%] rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-900 sm:max-w-[80%]">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertCircle size={16} /> Needs a bit more detail
+          </div>
+          <p className="mt-1.5 whitespace-pre-wrap">{message.text}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`max-w-[92%] rounded-2xl px-3.5 py-2.5 text-sm sm:max-w-[80%] ${
+          isUser
+            ? "bg-slate-900 text-white"
+            : message.kind === "status"
+              ? "border border-sky-200 bg-sky-50 text-sky-900"
+              : "bg-slate-100 text-slate-800"
+        }`}
+      >
+        <div className="whitespace-pre-wrap">{message.text}</div>
+        {message.attachments?.length ? (
+          <div className="mt-1.5 text-xs opacity-70">
+            Attached: {message.attachments.map((attachment) => attachment.path || attachment.name).join(", ")}
+          </div>
+        ) : null}
+        {message.kind === "status" && message.chapterKey && onPreview ? (
+          <button
+            type="button"
+            onClick={() => onPreview(message.chapterKey!)}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-700"
+          >
+            <Eye size={13} /> Preview
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DraftComposer({
+  input,
+  setInput,
+  attachments,
+  busy,
+  chapterLabel,
+  fileRef,
+  onFileSelect,
+  onOpenFilePicker,
+  onSend,
+  creditBalance,
+  creditsCost,
+  onTopUp,
+}: {
+  input: string;
+  setInput: (value: string) => void;
+  attachments: File[];
+  busy: boolean;
+  chapterLabel: string;
+  fileRef: React.RefObject<HTMLInputElement | null>;
+  onFileSelect: (event?: React.ChangeEvent<HTMLInputElement>) => void;
+  onOpenFilePicker: () => void;
+  onSend: () => void;
+  creditBalance?: number | null;
+  creditsCost?: number;
+  onTopUp?: () => void;
+}) {
+  const cost = creditsCost ?? 3;
+  const lowBalance = typeof creditBalance === "number" && creditBalance < cost;
+  const hasText = input.trim().length > 0;
+
+  return (
+    <div className="border-t border-slate-200 bg-white p-3 sm:p-4">
+      {lowBalance ? (
+        <p className="mb-2 text-xs font-medium text-amber-700">
+          Balance: {creditBalance} credits — top up to keep generating.
+        </p>
+      ) : null}
+      <div className="flex items-end gap-2">
+        <input ref={fileRef} type="file" multiple onChange={(event) => onFileSelect(event)} className="hidden" />
+        <button
+          type="button"
+          onClick={onOpenFilePicker}
+          className="shrink-0 rounded-full border border-slate-300 p-2.5 text-slate-600"
+          aria-label="Attach files"
+          title="Attach files"
+        >
+          <Paperclip size={16} />
+        </button>
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          rows={1}
+          placeholder={`Ask AI to continue with ${chapterLabel}, or describe a change…`}
+          className="min-w-0 flex-1 resize-none rounded-2xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !busy) {
+              e.preventDefault();
+              if (lowBalance && onTopUp) onTopUp();
+              else onSend();
+            }
+          }}
+        />
+        {lowBalance ? (
+          <button
+            type="button"
+            onClick={() => onTopUp?.()}
+            className="inline-flex shrink-0 items-center gap-2 rounded-full bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white"
+          >
+            Top up
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={busy}
+            className="inline-flex shrink-0 items-center gap-2 rounded-full bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+            {busy ? "Working…" : hasText ? "Send" : "Continue"}
+          </button>
+        )}
+      </div>
+      {attachments.length > 0 ? (
+        <div className="mt-2 text-xs text-slate-600">
+          Attached: {attachments.map((attachment) => attachment.name).join(", ")}
+        </div>
+      ) : null}
+      <p className="mt-2 text-[11px] text-slate-400">
+        Uses {cost} credits per generation · Enter to send, Shift+Enter for a new line
+      </p>
+    </div>
+  );
+}
+
+function PreviewDrawer(props: {
+  open: boolean;
+  onClose: () => void;
+  tabs: Array<{ key: string; label: string }>;
+  activeKey: string;
+  onSelectTab: (key: string) => void;
+  coverPageData?: Omit<CoverPagePreviewProps, "extraNotes">;
+  chapterStore: ChapterLike[];
+  references: ReferenceLike[];
+  referenceHelpMessage: string | null;
+  onFindReferences: () => void;
+  findingReferences: boolean;
+  referenceInput: string;
+  setReferenceInput: (value: string) => void;
+  onSaveReferences: () => void;
+}) {
+  if (!props.open) return null;
+  const activeChapter = props.chapterStore.find((chapter) => chapter.chapter_key === props.activeKey);
+  const isCover = ["cover", "cover_page"].includes(props.activeKey);
+  const isReferences = props.activeKey === "references";
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-slate-950/40" onClick={props.onClose} aria-hidden="true" />
+      <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-2xl sm:max-w-lg">
+        <div className="flex items-center justify-between border-b border-slate-200 p-4">
+          <div className="text-sm font-semibold text-slate-900">Preview</div>
+          <button
+            type="button"
+            onClick={props.onClose}
+            className="rounded-full border border-slate-200 p-1.5 text-slate-600"
+            aria-label="Close preview"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="flex gap-2 overflow-x-auto border-b border-slate-200 p-3">
+          {props.tabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => props.onSelectTab(tab.key)}
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium ${
+                props.activeKey === tab.key
+                  ? "border-sky-400 bg-sky-50 text-sky-800"
+                  : "border-slate-200 bg-white text-slate-600"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {isCover && props.coverPageData ? (
+            <ProposalCoverPagePreview {...props.coverPageData} extraNotes={activeChapter?.content_md || ""} />
+          ) : isReferences ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm text-slate-600">
+                  Credible academic references found from your title, plus any you add.
+                </p>
+                <button
+                  type="button"
+                  onClick={props.onFindReferences}
+                  disabled={props.findingReferences}
+                  className="shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-60"
+                >
+                  {props.findingReferences ? "Finding…" : "Find more"}
+                </button>
+              </div>
+              {props.referenceHelpMessage ? (
+                <div className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-900">
+                  {props.referenceHelpMessage}
+                </div>
+              ) : null}
+              <div className="space-y-2">
+                {props.references.length ? (
+                  props.references.map((ref, index) => (
+                    <div key={ref.id || index} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="text-sm font-medium text-slate-800">{ref.title || ref.url || "Reference"}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {[ref.author, ref.year, ref.journal || ref.publisher].filter(Boolean).join(" · ") || "Reference"}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-sm text-slate-500">
+                    No references yet.
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2 border-t border-slate-200 pt-3">
+                <label className="block text-xs font-medium text-slate-600">Add your own (one per line)</label>
+                <textarea
+                  value={props.referenceInput}
+                  onChange={(e) => props.setReferenceInput(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                />
+                <button
+                  type="button"
+                  onClick={props.onSaveReferences}
+                  className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          ) : activeChapter?.content_md ? (
+            <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{activeChapter.content_md}</div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+              Not drafted yet. Ask AI to continue in the chat to generate this section.
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function ProposalWorkspaceShell(props: WorkspaceShellProps) {
-  const [showPrimaryNav, setShowPrimaryNav] = useState(false);
   const [showStructureNav, setShowStructureNav] = useState(false);
-  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const { chapterStore, getChapterLabel } = props;
 
-  const frontMatterItems = useMemo(() => {
-    const base = [
-      { key: "cover_page", label: "Cover page", kind: "front_matter" as const },
-      { key: "table_of_contents", label: "Table of contents", kind: "front_matter" as const },
-    ];
-    if (props.currentStage === "full_project") {
-      return [...base, { key: "abstract", label: "Abstract", kind: "front_matter" as const }, { key: "acknowledgement", label: "Acknowledgement", kind: "front_matter" as const }];
-    }
-    return base;
-  }, [props.currentStage]);
+  const structureItems = useMemo(
+    () => chapterStore.map((chapter) => ({ key: chapter.chapter_key, label: chapter.title || getChapterLabel(chapter.chapter_key) })),
+    [chapterStore, getChapterLabel]
+  );
 
-  const structureItems = useMemo(() => [...frontMatterItems, ...props.chapterStore.map((chapter: any) => ({ key: chapter.chapter_key, label: chapter.title || props.getChapterLabel(chapter.chapter_key), kind: "chapter" as const }))], [frontMatterItems, props.chapterStore, props.getChapterLabel]);
+  const previewTabs = useMemo(
+    () => [...structureItems, { key: "references", label: "References" }],
+    [structureItems]
+  );
+
+  const referencesCount = props.project.metadata?.references?.length || 0;
 
   const handleSelect = (key: string) => {
     props.onSelectChapter(key);
     setShowStructureNav(false);
-    window.requestAnimationFrame(() => {
-      sectionRefs.current[key]?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
   };
 
-  const currentChapterContent = props.chapterStore.find((chapter: any) => chapter.chapter_key === props.currentChapter)?.content_md || "";
-  const requiredDiagrams = props.currentStage === "full_project"
-    ? ["Conceptual framework", "System architecture", "Methodology flowchart"]
-    : ["Conceptual framework"];
+  const chapterNavRows = (onAfterSelect?: () => void) => (
+    <div className="space-y-2">
+      {structureItems.map((item) => {
+        const status = props.getStatus(item.key);
+        const isActive = props.currentChapter === item.key;
+        const isReady = status === "complete";
+        return (
+          <div
+            key={item.key}
+            className={`flex items-center gap-1 rounded-xl border pr-1 ${
+              isActive ? "border-sky-400 bg-sky-50" : "border-slate-200 bg-white"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                handleSelect(item.key);
+                onAfterSelect?.();
+              }}
+              className={`min-w-0 flex-1 truncate px-3 py-2 text-left text-sm ${
+                isActive ? "text-sky-800" : "text-slate-700"
+              }`}
+            >
+              {item.label}
+            </button>
+            <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-medium ${STATUS_META[status].className}`}>
+              {STATUS_META[status].label}
+            </span>
+            {isReady ? (
+              <button
+                type="button"
+                onClick={() => props.onOpenPreview(item.key)}
+                className="shrink-0 rounded-full p-1.5 text-slate-500 hover:bg-slate-100"
+                aria-label={`Preview ${item.label}`}
+              >
+                <Eye size={14} />
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        onClick={() => {
+          props.onOpenPreview("references");
+          onAfterSelect?.();
+        }}
+        className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:border-slate-300"
+      >
+        <span>References</span>
+        <span className="text-xs text-slate-500">{referencesCount} found</span>
+      </button>
+      {props.currentStage === "initial_proposal" && props.initialProposalReady ? (
+        <button
+          type="button"
+          onClick={props.onContinueToFullProject}
+          disabled={props.continuingToFullProject}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {props.continuingToFullProject ? <Loader2 size={14} className="animate-spin" /> : null}
+          {props.continuingToFullProject ? "Unlocking…" : "Continue to full project"}
+        </button>
+      ) : null}
+    </div>
+  );
 
-  return (
-    <div className="mx-auto max-w-7xl px-3 py-6 sm:px-4 lg:px-0 lg:py-8 space-y-6">
-      <header className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="hidden rounded-2xl bg-sky-100 p-2 text-sky-700 sm:flex">
-              <BookOpen size={18} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <button className="rounded-full border border-slate-200 p-2 text-slate-600 lg:hidden" onClick={() => setShowPrimaryNav(true)}>
-                  <Menu size={16} />
-                </button>
-                <button className="rounded-full border border-slate-200 p-2 text-slate-600 lg:hidden" onClick={() => setShowStructureNav(true)}>
-                  <LayoutPanelLeft size={16} />
-                </button>
-                <h1 className="truncate text-xl font-semibold text-slate-900">{props.project.title}</h1>
-              </div>
-              <p className="mt-1 text-sm text-slate-600">Structured proposal drafting with stage-aware chapters, inline diagrams, and guided clarification.</p>
+  const chatColumn = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        {props.messages.map((message, index) => (
+          <MessageBubble
+            key={`${message.role}-${index}`}
+            message={message}
+            onPreview={props.onOpenPreview}
+            onContinueToFullProject={props.onContinueToFullProject}
+            continuingToFullProject={props.continuingToFullProject}
+          />
+        ))}
+        {props.busy ? (
+          <div className="flex justify-start">
+            <div className="inline-flex items-center gap-2 rounded-2xl bg-slate-100 px-3.5 py-2.5 text-sm text-slate-700">
+              <Loader2 size={14} className="animate-spin" />
+              Drafting {props.getChapterLabel(props.currentChapter)}…
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={props.onSaveProject} disabled={props.saving} className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700">
-              {props.saving ? "Saving..." : "Save"}
+        ) : null}
+        <div ref={messagesEndRef} />
+      </div>
+      <DraftComposer
+        input={props.input}
+        setInput={props.setInput}
+        attachments={props.attachments}
+        busy={props.busy}
+        chapterLabel={props.getChapterLabel(props.currentChapter)}
+        fileRef={props.fileRef}
+        onFileSelect={props.onFileSelect}
+        onOpenFilePicker={props.onOpenFilePicker}
+        onSend={props.onSend}
+        creditBalance={props.creditBalance}
+        creditsCost={props.creditsCost ?? 3}
+        onTopUp={props.onTopUp}
+      />
+    </div>
+  );
+
+  return (
+    <div className="mx-auto flex h-[calc(100vh-4.5rem)] max-w-6xl flex-col px-0 py-3 sm:py-4 lg:px-0">
+      <header className="mb-3 shrink-0 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm sm:p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-2">
+            <button
+              type="button"
+              className="mt-0.5 shrink-0 rounded-full border border-slate-200 p-2 text-slate-600 lg:hidden"
+              onClick={() => setShowStructureNav(true)}
+              aria-label="Open chapters"
+            >
+              <Menu size={16} />
             </button>
-            <button onClick={props.onExport} disabled={props.exporting} className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white flex items-center gap-2">
-              <FileText size={16} /> {props.exporting ? "Preparing..." : "Export"}
+            <div className="min-w-0 flex-1">
+              <Link href="/workspace/proposals" className="text-xs font-medium text-slate-500 hover:text-slate-700">
+                ← Back to proposals
+              </Link>
+              <h1 className="min-w-0 truncate text-lg font-semibold text-slate-900 sm:text-xl">{props.project.title}</h1>
+              {props.project.metadata?.title_refined && props.project.metadata?.original_title ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  AI cleaned up your title from: <span className="italic">“{props.project.metadata.original_title}”</span>
+                  {props.onRevertTitle ? (
+                    <button type="button" onClick={props.onRevertTitle} className="ml-2 font-medium text-sky-700 hover:underline">
+                      Undo
+                    </button>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={() => props.onOpenPreview(props.currentChapter)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+            >
+              <Eye size={15} /> <span className="hidden sm:inline">Preview</span>
+            </button>
+            <button
+              type="button"
+              onClick={props.onSaveProject}
+              disabled={props.saving}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-60"
+            >
+              {props.saving ? <Loader2 size={14} className="animate-spin" /> : null}
+              <span className="hidden sm:inline">{props.saving ? "Saving…" : "Save"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={props.onExport}
+              disabled={props.exporting}
+              className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {props.exporting ? <Loader2 size={14} className="animate-spin" /> : <FileText size={15} />}
+              <span className="hidden sm:inline">{props.exporting ? "Preparing…" : "Export"}</span>
             </button>
           </div>
         </div>
       </header>
 
-      <div className="hidden gap-6 lg:grid lg:grid-cols-[220px_260px_minmax(0,1fr)]">
-        <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <FolderOpen size={16} /> Primary nav
+      <div className="flex min-h-0 flex-1 gap-4">
+        <aside className="hidden w-60 shrink-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm lg:block">
+          <div className="flex items-center justify-between px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <span>Chapters</span>
           </div>
-          <div className="mt-4 space-y-3">
-            <Link href="/workspace/proposals" className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:border-sky-300 hover:bg-sky-50">
-              <span>Back to proposals</span>
-              <ChevronRight size={16} />
-            </Link>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Current project</div>
-              <div className="mt-1 text-sm font-semibold text-slate-900">{props.project.title}</div>
-              <div className="mt-1 text-xs text-slate-600">{props.project.department || "Department not set"}</div>
-            </div>
-          </div>
+          {chapterNavRows()}
         </aside>
 
-        <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-900">Structure</div>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">{props.currentStage === "full_project" ? "Full project" : "Initial proposal"}</span>
-          </div>
-
-          <label className="mt-4 block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Stage
-            <select value={props.currentStage} onChange={(e) => props.onStageChange(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-              {STAGE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="mt-3 block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Spec key
-            <input value={props.specKey} onChange={(e) => props.setSpecKey(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700" placeholder="default-proposal" />
-          </label>
-
-          <div className="mt-4 space-y-2">
-            {structureItems.map((item) => {
-              const status = props.getStatus(item.key);
-              const isActive = props.currentChapter === item.key;
-              return (
-                <button key={item.key} onClick={() => props.onSelectChapter(item.key)} className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${isActive ? "border-sky-400 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"}`}>
-                  <span className="truncate">{item.label}</span>
-                  <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${STATUS_META[status].className}`}>{STATUS_META[status].label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-
-        <main className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <section className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">Document presenter</div>
-                  <div className="text-sm text-slate-600">Live proposal content with inline guidance and diagram hints.</div>
-                </div>
-                <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-sky-800">{props.currentStage === "full_project" ? "Full project" : "Initial proposal"}</span>
-              </div>
-            </div>
-
-            {props.pendingQuestion ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                <div className="flex items-center gap-2 font-semibold"><AlertCircle size={16} /> Clarification prompt</div>
-                <div className="mt-2">{props.pendingQuestion}</div>
-              </div>
-            ) : null}
-
-            <div ref={(node) => { sectionRefs.current[props.currentChapter] = node; }} className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">{props.getChapterLabel(props.currentChapter)}</div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500">{props.currentChapter}</div>
-                </div>
-                <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_META[props.getStatus(props.currentChapter)].className}`}>{STATUS_META[props.getStatus(props.currentChapter)].label}</span>
-              </div>
-              <div className="mt-3 space-y-3">
-                {props.messages.length ? props.messages.map((message, index) => (
-                  <div key={`${message.role}-${index}`} className={`rounded-xl p-3 ${message.role === "user" ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-800"}`}>
-                    <div className="whitespace-pre-wrap text-sm">{message.text}</div>
-                    {message.attachments?.length ? <div className="mt-2 text-xs text-slate-500">Attachments: {message.attachments.map((attachment: any) => attachment.path || attachment.name).join(", ")}</div> : null}
-                  </div>
-                )) : <div className="rounded-xl border border-dashed border-slate-300 p-3 text-sm text-slate-600">No content generated yet for this chapter. Start drafting to populate the document presenter.</div>}
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-sm font-semibold text-slate-900">Inline diagrams</div>
-                <ul className="mt-3 space-y-2 text-sm text-slate-600">
-                  {requiredDiagrams.map((diagram) => (
-                    <li key={diagram} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">{diagram}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-sm font-semibold text-slate-900">References</div>
-                <div className="mt-3 text-sm text-slate-600">
-                  {props.project?.metadata?.references?.length ? props.project.metadata.references.map((ref: any, index: number) => <div key={`${ref.id || index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 mt-2">{ref.title}</div>) : <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2">Add references to ground the literature review.</div>}
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-semibold text-slate-900">Draft next step</div>
-                <span className="rounded-full bg-slat-100 px-2.5 py-1 text-xs font-medium text-slate-600">Responsive workflow</span>
-              </div>
-              <div className="mt-3 space-y-3">
-                <textarea value={props.referenceInput} onChange={(e) => props.setReferenceInput(e.target.value)} rows={3} placeholder="Optional references (one per line)" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700" />
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={props.onSaveReferences} className="rounded-full border border-slate-300 px-3 py-2 text-sm text-slate-700">Save references</button>
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input value={props.input} onChange={(e) => props.setInput(e.target.value)} placeholder={`Draft ${props.getChapterLabel(props.currentChapter)}...`} className="flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700" />
-                  <div className="flex gap-2">
-                    <input ref={props.fileRef} type="file" multiple onChange={(event) => props.onFileSelect(event)} className="hidden" />
-                    <button onClick={() => props.onFileSelect()} className="rounded-lg border border-slate-300 p-2 text-slate-600"><FileText size={16} /></button>
-                    <button onClick={props.onSend} disabled={props.busy} className="rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white">{props.busy ? "…" : "Send"}</button>
-                  </div>
-                </div>
-                {props.attachments.length > 0 ? <div className="text-xs text-slate-600">Attached: {props.attachments.map((attachment) => attachment.name).join(", ")}</div> : null}
-              </div>
-            </div>
-          </section>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          {chatColumn}
         </main>
-      </div>
-
-      <div className="space-y-4 lg:hidden">
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-900">Document presenter</div>
-            <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-sky-800">{props.currentStage === "full_project" ? "Full project" : "Initial proposal"}</span>
-          </div>
-          <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-            The presenter stays front and center on mobile while chapters and project navigation open as overlays.
-          </div>
-        </section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-sm font-semibold text-slate-900">{props.getChapterLabel(props.currentChapter)}</div>
-            <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_META[props.getStatus(props.currentChapter)].className}`}>{STATUS_META[props.getStatus(props.currentChapter)].label}</span>
-          </div>
-          <div className="mt-3 space-y-3">
-            {props.pendingQuestion ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{props.pendingQuestion}</div>
-            ) : null}
-            {props.messages.length ? props.messages.map((message, index) => (
-              <div key={`${message.role}-${index}`} className={`rounded-xl p-3 ${message.role === "user" ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-800"}`}>
-                <div className="whitespace-pre-wrap text-sm">{message.text}</div>
-              </div>
-            )) : <div className="rounded-xl border border-dashed border-slate-300 p-3 text-sm text-slate-600">No content yet.</div>}
-          </div>
-        </section>
-      </div>
-
-      {showPrimaryNav ? (
-        <div className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" onClick={() => setShowPrimaryNav(false)} />
-      ) : null}
-      <div className={`fixed inset-y-0 left-0 z-50 w-80 max-w-[85vw] border-r border-slate-200 bg-white p-4 shadow-xl transition-transform duration-200 lg:hidden ${showPrimaryNav ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold text-slate-900">Primary nav</div>
-          <button onClick={() => setShowPrimaryNav(false)} className="rounded-full border border-slate-200 p-2 text-slate-600">×</button>
-        </div>
-        <div className="mt-4 space-y-3">
-          <Link href="/workspace/proposals" className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700" onClick={() => setShowPrimaryNav(false)}>
-            <span>Back to proposals</span>
-            <ChevronRight size={16} />
-          </Link>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-xs uppercase tracking-wide text-slate-500">Current project</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{props.project.title}</div>
-          </div>
-        </div>
       </div>
 
       {showStructureNav ? (
         <div className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" onClick={() => setShowStructureNav(false)} />
       ) : null}
-      <div className={`fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-auto rounded-t-2xl border border-slate-200 bg-white p-4 shadow-xl transition-transform duration-200 lg:hidden ${showStructureNav ? "translate-y-0" : "translate-y-full"}`}>
+      <div
+        className={`fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-auto rounded-t-2xl border border-slate-200 bg-white p-4 shadow-xl transition-transform duration-200 lg:hidden ${
+          showStructureNav ? "translate-y-0" : "translate-y-full"
+        }`}
+      >
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-900">Chapters</div>
-          <button onClick={() => setShowStructureNav(false)} className="rounded-full border border-slate-200 p-2 text-slate-600">×</button>
+          <button
+            type="button"
+            onClick={() => setShowStructureNav(false)}
+            className="rounded-full border border-slate-200 px-2.5 py-1 text-slate-600"
+          >
+            <X size={16} />
+          </button>
         </div>
-        <div className="mt-4 space-y-2">
-          {structureItems.map((item) => {
-            const status = props.getStatus(item.key);
-            const isActive = props.currentChapter === item.key;
-            return (
-              <button key={item.key} onClick={() => handleSelect(item.key)} className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm ${isActive ? "border-sky-400 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700"}`}>
-                <span>{item.label}</span>
-                <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${STATUS_META[status].className}`}>{STATUS_META[status].label}</span>
-              </button>
-            );
-          })}
-        </div>
+        <div className="mt-4">{chapterNavRows(() => setShowStructureNav(false))}</div>
       </div>
+
+      <PreviewDrawer
+        open={props.previewOpen}
+        onClose={props.onClosePreview}
+        tabs={previewTabs}
+        activeKey={props.previewChapterKey}
+        onSelectTab={props.onOpenPreview}
+        coverPageData={props.coverPageData}
+        chapterStore={props.chapterStore}
+        references={props.project.metadata?.references || []}
+        referenceHelpMessage={props.referenceHelpMessage}
+        onFindReferences={props.onFindReferences}
+        findingReferences={props.findingReferences}
+        referenceInput={props.referenceInput}
+        setReferenceInput={props.setReferenceInput}
+        onSaveReferences={props.onSaveReferences}
+      />
     </div>
   );
 }
+

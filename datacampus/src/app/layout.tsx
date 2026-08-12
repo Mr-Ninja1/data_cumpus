@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import Header from "@/components/Header";
@@ -36,13 +37,15 @@ export default function RootLayout({
               <Header />
               <div className="flex flex-1">
                 <Sidebar />
-                <main className="flex-1 w-full bg-white dark:bg-gray-950 md:bg-gray-50 md:dark:bg-gray-950">
+                <main className="min-w-0 flex-1 w-full bg-white dark:bg-gray-950 md:bg-gray-50 md:dark:bg-gray-950">
                   <AppFrame>{children}</AppFrame>
                 </main>
               </div>
             </div>
             <Toast />
-            <MobileTabBar />
+            <Suspense fallback={null}>
+              <MobileTabBar />
+            </Suspense>
             <ClientExtras />
           </LibraryProvider>
         </PreferencesProvider>

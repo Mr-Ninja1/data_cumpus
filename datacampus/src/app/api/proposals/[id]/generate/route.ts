@@ -2,9 +2,75 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthedUser } from '@/utils/serverAuth';
 import { supabaseServer } from '@/utils/supabaseServerClient';
 import { runModel } from '@/utils/models';
-import { buildChapterGenerationGuidance, buildLiteratureReviewContext, getStageDefinition, hasValue, parseReferencesInput, parseRequiredInputs } from '@/utils/proposalFlow';
+import {
+  buildChapterGenerationGuidance,
+  buildLiteratureReviewContext,
+  getChapterDiagramRequirements,
+  hasValue,
+  isInitialProposalReady,
+  parseReferencesInput,
+  parseRequiredInputs,
+} from '@/utils/proposalFlow';
+import { buildProposalStandardContext } from '@/utils/proposalStandards';
+import { buildZutProposalGuardrails, SCHOOL_PROFILE } from '@/utils/schoolProfile';
+import { loadWorkspaceSchoolSettings } from '@/utils/workspaceSchoolSettings';
+import {
+  extractMarkdownSectionForChapter,
+  getChapterSpecFragment,
+  getFrontOrBackMatterFragment,
+  parseStructuredSpec,
+} from '@/utils/proposalSpec';
+
+type DocumentSpecRow = {
+  key: string;
+  spec_md?: string | null;
+  spec_json?: unknown;
+  title?: string | null;
+  description?: string | null;
+};
+
+type ProposalReference = {
+  title?: string;
+  author?: string;
+  year?: string | number | null;
+};
+
+type ProposalChapter = {
+  chapter_key?: string;
+  title?: string;
+  content_md?: string;
+  stage?: string;
+  updated_at?: string;
+};
 
 export const runtime = 'nodejs';
+
+function isCoverSection(sectionKey: string) {
+  return ['cover', 'cover_page'].includes(sectionKey);
+}
+
+async function loadPreferredSpec() {
+  if (!supabaseServer) return null;
+
+  const schoolSettings = await loadWorkspaceSchoolSettings();
+  const preferredKeys = [
+    schoolSettings.default_proposal_spec_key,
+    'zut-it-final-year-proposal',
+    'zut-final-year-project-proposal',
+    'default-proposal',
+  ].filter(Boolean) as string[];
+
+  const { data } = await supabaseServer
+    .from('document_specs')
+    .select('key, spec_md, spec_json, title, description')
+    .in('key', preferredKeys);
+
+  return (
+    preferredKeys
+      .map((key) => (data || []).find((entry: DocumentSpecRow) => entry.key === key))
+      .find(Boolean) || null
+  );
+}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,7 +84,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const promptText = body.promptText || 'Draft a proposal section';
   const creditsToSpend = Number(body.creditsToSpend || 3);
   const attachments = Array.isArray(body.attachments) ? body.attachments : [];
-  const templateId = body.templateId || null;
+  const provider = body.provider || process.env.MODEL_PROVIDER || 'local-stub';
+  const model = body.model || 'default';
 
   const { data: walletData, error: walletError } = await supabaseServer
     .from('wallets')
@@ -32,14 +99,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if ((walletData?.balance_credits ?? 0) < creditsToSpend) {
     return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
-  }
-
-  const { error: updateError } = await supabaseServer
-    .from('wallets')
-    .upsert({ user_id: user.id, balance_credits: (walletData?.balance_credits ?? 0) - creditsToSpend, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
-
-  if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
   const { data: project, error: projectError } = await supabaseServer
@@ -67,11 +126,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: sectionError.message }, { status: 500 });
   }
 
-  // If ASYNC_GENERATION is enabled, enqueue a job and return the job id
   if (process.env.ASYNC_GENERATION === 'true') {
     const { data: job, error: jobErr } = await supabaseServer
       .from('generator_jobs')
-      .insert({ user_id: user.id, project_id: id, section_key: sectionKey, payload: { promptText, creditsToSpend, attachments, templateId, sectionKey, projectId: id } })
+      .insert({
+        user_id: user.id,
+        project_id: id,
+        section_key: sectionKey,
+        payload: { promptText, creditsToSpend, attachments, sectionKey, projectId: id, provider, model },
+      })
       .select()
       .single();
 
@@ -79,83 +142,154 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ job: job, status: 'queued' });
   }
 
-  // RAG: fetch template chunks if a template is selected
-  let retrievedContext = '';
-  if (templateId) {
-    const { data: chunks } = await supabaseServer
-      .from('proposal_template_chunks')
-      .select('chunk_text')
-      .eq('template_id', templateId)
-      .order('chunk_index', { ascending: true })
-      .limit(5);
-    if (chunks && chunks.length) {
-      retrievedContext = chunks.map((c: any) => c.chunk_text).join('\n\n');
-    }
-  }
+  const { data: profile } =
+    (await supabaseServer
+      ?.from('profiles')
+      .select('full_name,student_id,program,department')
+      .eq('id', user.id)
+      .maybeSingle()) ?? {};
 
-  // Fetch profile to autofill cover page
-  const { data: profile } = await supabaseServer?.from('profiles').select('full_name,student_id,program,department').eq('id', user.id).maybeSingle() ?? {};
+  const schoolSettings = await loadWorkspaceSchoolSettings();
+  const explicitSpecKey = project?.metadata?.spec_key || body.specKey || schoolSettings.default_proposal_spec_key || null;
+  const specData = explicitSpecKey
+    ? await supabaseServer
+        .from('document_specs')
+        .select('key, spec_md, spec_json, title, description')
+        .eq('key', explicitSpecKey)
+        .maybeSingle()
+        .then((result) => result.data || null)
+    : await loadPreferredSpec();
 
-  // Build system/messages for the model
-  const specKey = project?.metadata?.spec_key || body.specKey || 'default-proposal';
-  const { data: specData } = await supabaseServer.from('document_specs').select('spec_md, title, description').eq('key', specKey).maybeSingle();
   const specText = specData?.spec_md || '';
+  const structuredSpec = parseStructuredSpec(specData?.spec_json);
   const requiredInputs = parseRequiredInputs(specText, sectionKey);
+
   const missingInputs = requiredInputs.filter((input) => !hasValue(project?.metadata?.[input] || body[input]));
-  if (missingInputs.length > 0) {
+
+  if (missingInputs.length > 0 && isCoverSection(sectionKey)) {
     const question = `Need a bit more detail before drafting ${chapterKey}: ${missingInputs.join(', ')}.`;
     const nextMetadata = { ...(project?.metadata || {}), stage, awaiting_input: true, pending_input_question: question };
-    await supabaseServer.from('proposal_projects').update({ metadata: nextMetadata, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', user.id);
+    await supabaseServer
+      .from('proposal_projects')
+      .update({ metadata: nextMetadata, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', user.id);
     return NextResponse.json({ status: 'awaiting_input', question, missingInputs });
   }
 
-  const system = `You are an academic assistant that drafts project proposals following the supplied document spec. Write polished academic content with clear headings, concise paragraphs, and practical detail. When generating a cover page, include the student's full name and student id if available. Avoid placeholders and generic filler.`;
+  const existingContent = String(
+    (Array.isArray(project?.metadata?.chapters)
+      ? (project.metadata.chapters as ProposalChapter[]).find((chapter) => chapter.chapter_key === chapterKey)?.content_md
+      : '') || section?.content_md || ''
+  ).trim();
+
+  const system = [
+    `You are the academic proposal drafting assistant for ${schoolSettings.school_name || SCHOOL_PROFILE.name} (${schoolSettings.school_short_name || SCHOOL_PROFILE.shortName}).`,
+    buildZutProposalGuardrails(),
+    'Write polished academic content with clear headings, concise paragraphs, practical detail, and strong alignment between title, problem, objectives, and methodology.',
+    'The proposal spec (structured JSON) is authoritative for required sections, their order, and what each section must contain — there is no separate sample proposal in this workflow.',
+    'Prefer title-driven inference when information is sparse, but never invent unverifiable identity details or fake citations.',
+    'If references were auto-found from the title, treat them as candidate evidence, not guaranteed truth. Use only the references that are clearly relevant to the current chapter and the actual project topic.',
+    'Avoid placeholders and generic filler.',
+    existingContent
+      ? 'A current draft for this exact section is provided below. Treat this as a revision/edit request, not a fresh rewrite: keep everything the user did not ask to change, and apply exactly what they asked for. Only produce a full rewrite if the user explicitly asks to start over.'
+      : 'There is no existing draft for this section yet — write a complete, submission-ready first draft.',
+    'Cover page and table of contents formatting are not strictly mandated by the school — keep them professional and clean, and always prioritize honoring specific user formatting requests (layout, wording, emphasis, order) over any default styling. Chapters 1-3 content must still follow the required structure from the spec.',
+  ].join('\n');
+
   let userPrompt = promptText;
-  if (sectionKey === 'cover') {
+  if (['cover', 'cover_page'].includes(sectionKey)) {
     const studentName = profile?.full_name || user.email || '';
     const studentId = profile?.student_id || '';
-    userPrompt = `Create a cover page for project titled "${project.title}". Student: ${studentName} (${studentId}). Supervisor: ${project.supervisor || ''}. Include school logo on top.` + (promptText ? `\nAdditional notes: ${promptText}` : '');
+    const logoHint = schoolSettings.logo_path ? ` Use the stored school logo asset at ${schoolSettings.logo_path}.` : '';
+    userPrompt = `Create a cover page for project titled "${project.title}". Student: ${studentName} (${studentId}). Supervisor: ${project.supervisor || ''}. Include the school logo on top and match the uploaded school cover-page style.${logoHint}` + (promptText ? `\nAdditional notes: ${promptText}` : '');
   }
 
-  const referencesPayload = Array.isArray(project?.metadata?.references) ? project.metadata.references : [];
-  const referencesContext = referencesPayload.length ? `Reference list:\n${referencesPayload.map((ref: any) => `- ${ref.title} (${ref.author || 'Unknown'}, ${ref.year || 'n.d.'})`).join('\n')}` : 'No references supplied yet.';
-  const stageDefinition = getStageDefinition(stage, project.title, project.department || '');
-  const diagramGuidance = `Stage diagram requirements: ${stageDefinition.required_diagrams.join(', ')}.`;
+  const referencesPayload: ProposalReference[] = Array.isArray(project?.metadata?.references)
+    ? (project.metadata.references as ProposalReference[])
+    : [];
+  const referencesContext = referencesPayload.length
+    ? [
+        'Reference list (use selectively and only when clearly relevant to the project title/section):',
+        ...referencesPayload.map((ref) => `- ${ref.title} (${ref.author || 'Unknown'}, ${ref.year || 'n.d.'})`),
+        'Do not force every reference into the chapter. Use only the ones that actually fit the argument, and ignore weak or irrelevant matches.',
+        'If the available references are shallow, say less rather than inventing evidence.',
+      ].join('\n')
+    : 'No references supplied yet. If the user did not provide references, do not fabricate source details.';
+  const chapterDiagramRequirements = getChapterDiagramRequirements(stage, chapterKey);
+  const diagramGuidance = chapterDiagramRequirements.length
+    ? `Required diagram(s) for this section: ${chapterDiagramRequirements.join('; ')}.`
+    : '';
   const chapterGuidance = buildChapterGenerationGuidance(stage, chapterKey, project.title);
-  const literatureReviewGuidance = chapterKey === 'chapter_1' ? `\n\n${buildLiteratureReviewContext(project.title, project.department || '', referencesPayload)}` : '';
-  const modelInput = `${specText ? `Document spec:\n${specText}\n\n` : ''}${retrievedContext ? `Retrieved template context:\n${retrievedContext}\n\n` : ''}${referencesContext}\n\n${diagramGuidance}\n\n${chapterGuidance}\n\n${literatureReviewGuidance}\n\nUser request:\n${userPrompt}`;
+  const standardsContext = buildProposalStandardContext(
+    {
+      title: project.title,
+      department: project.department || profile?.department || null,
+      supervisor: project.supervisor,
+      academic_year: project.academic_year,
+    },
+    chapterKey
+  );
+  const literatureReviewGuidance =
+    chapterKey === 'chapter_1' ? `\n\n${buildLiteratureReviewContext(project.title, project.department || '', referencesPayload)}` : '';
+  const missingInputGuidance = missingInputs.length
+    ? `Preferred but missing inputs: ${missingInputs.join(', ')}. Infer carefully from the title and ZUT examples where possible, and leave out unsupported personal/admin details.`
+    : '';
 
-  // Try to consume credits via RPC if available (atomic)
+  // Only pull the fragment of the spec relevant to the current section, not
+  // the whole guide. Structured specs (spec_json) are preferred; for legacy
+  // markdown specs, extract just the matching heading's block instead of
+  // injecting the entire document.
+  const structuredFragment = isCoverSection(sectionKey)
+    ? getFrontOrBackMatterFragment(structuredSpec, 'cover_page')
+    : getChapterSpecFragment(structuredSpec, chapterKey);
+  const specFragment = structuredFragment || (specText ? extractMarkdownSectionForChapter(specText, chapterKey) : '');
+  const specGuidance = specFragment
+    ? `Document spec${specData?.title ? ` (${specData.title})` : ''}:\n${specFragment}\n\n`
+    : '';
+
+  const existingContentBlock = existingContent
+    ? `Current existing draft for this section (revise this based on the user's request below; preserve what was not asked to change):\n"""\n${existingContent}\n"""\n\n`
+    : '';
+
+  const modelInput = `${specGuidance}${standardsContext}\n\n${referencesContext}\n\n${diagramGuidance ? `${diagramGuidance}\n\n` : ''}${chapterGuidance}\n\n${missingInputGuidance}${literatureReviewGuidance}\n\n${existingContentBlock}User request:\n${userPrompt}`;
+
   let txId: string | null = null;
   try {
-    if (supabaseServer) {
-      const rpc = await supabaseServer.rpc('consume_credits', {
-        p_user_id: user.id,
-        p_amount: creditsToSpend,
-        p_description: `proposal_generation:${id}:${sectionKey}`,
-        p_metadata: { project_id: id, sectionKey },
-      });
-      // rpc returns data with id when successful; shape may differ across Postgres clients
-      if (rpc?.error) throw rpc.error;
-      if (rpc?.data) txId = rpc.data;
-    }
-  } catch (rpcErr: any) {
-    return NextResponse.json({ error: rpcErr?.message || 'Failed to deduct credits' }, { status: 402 });
+    const rpc = await supabaseServer.rpc('consume_credits', {
+      p_user_id: user.id,
+      p_amount: creditsToSpend,
+      p_description: `proposal_generation:${id}:${sectionKey}`,
+      p_metadata: { project_id: id, sectionKey, provider, model },
+    });
+    if (rpc?.error) throw rpc.error;
+    if (rpc?.data) txId = rpc.data;
+  } catch (rpcErr: unknown) {
+    const message = rpcErr instanceof Error ? rpcErr.message : 'Failed to deduct credits';
+    return NextResponse.json({ error: message }, { status: 402 });
   }
 
-  // Call model (Gemini or stub)
   let modelResponse = '';
   try {
-    modelResponse = await runModel({ provider: process.env.MODEL_PROVIDER || 'local-stub', model: body.model || 'default', system, messages: [{ role: 'user', content: modelInput }], maxTokens: 1500 });
-  } catch (mErr: any) {
-    return NextResponse.json({ error: mErr?.message || 'Model error' }, { status: 500 });
+    modelResponse = await runModel({
+      provider,
+      model,
+      system,
+      messages: [{ role: 'user', content: modelInput }],
+      maxTokens: 1500,
+    });
+  } catch (mErr: unknown) {
+    const message = mErr instanceof Error ? mErr.message : 'Model error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   const responseText = String(modelResponse);
 
   const references = Array.isArray(body.references) ? body.references : [];
-  const existingChapters = Array.isArray(project?.metadata?.chapters) ? project.metadata.chapters : [];
-  const nextChapters = existingChapters.filter((chapter: any) => chapter.chapter_key !== chapterKey);
+  const existingChapters: ProposalChapter[] = Array.isArray(project?.metadata?.chapters)
+    ? (project.metadata.chapters as ProposalChapter[])
+    : [];
+  const nextChapters = existingChapters.filter((chapter) => chapter.chapter_key !== chapterKey);
   nextChapters.push({
     chapter_key: chapterKey,
     title: body.chapterTitle || `Chapter ${chapterKey.replace(/chapter_/g, '')}`,
@@ -164,16 +298,54 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     updated_at: new Date().toISOString(),
   });
 
+  const chapterOrder = Array.isArray(project?.metadata?.chapters)
+    ? (project.metadata.chapters as ProposalChapter[]).map((chapter) => chapter.chapter_key).filter(Boolean)
+    : [];
+  const completedChapterKeys = nextChapters
+    .filter((chapter) => String(chapter.content_md || '').trim().length > 0)
+    .map((chapter) => String(chapter.chapter_key || ''))
+    .filter(Boolean);
+  const nextPendingChapterKey = chapterOrder.find((key) => key && !completedChapterKeys.includes(key)) || null;
+  const nextReferences = references.length
+    ? [...referencesPayload, ...parseReferencesInput(references.join('\n'))]
+    : referencesPayload;
+  const initialProposalReady = isInitialProposalReady(nextChapters, nextReferences);
+
   const nextMetadata = {
     ...(project?.metadata || {}),
     stage,
     chapters: nextChapters,
-    references: references.length ? [...referencesPayload, ...parseReferencesInput(references.join('\n'))] : referencesPayload,
+    references: nextReferences,
     awaiting_input: false,
     pending_input_question: null,
+    school: schoolSettings.school_name || SCHOOL_PROFILE.name,
+    school_short_name: schoolSettings.school_short_name || SCHOOL_PROFILE.shortName,
+    last_generation_provider: provider,
+    last_generation_model: model,
+    workflow: {
+      ...((project?.metadata?.workflow as Record<string, unknown> | undefined) || {}),
+      mode: project?.metadata?.workflow_mode || 'classic',
+      status: nextPendingChapterKey ? 'in_progress' : 'complete',
+      current_chapter_key: chapterKey,
+      next_chapter_key: nextPendingChapterKey,
+      completed_chapter_keys: completedChapterKeys,
+      chapter_queue: chapterOrder,
+      initial_proposal_ready: initialProposalReady,
+      last_action: 'chapter_generated',
+      updated_at: new Date().toISOString(),
+    },
   };
 
-  await supabaseServer.from('proposal_projects').update({ metadata: nextMetadata, updated_at: new Date().toISOString() }).eq('id', id).eq('user_id', user.id);
+  await supabaseServer
+    .from('proposal_projects')
+    .update({
+      metadata: nextMetadata,
+      current_step: nextPendingChapterKey || chapterKey,
+      status: nextPendingChapterKey ? 'in_progress' : 'complete',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .eq('user_id', user.id);
 
   const { data: inserted, error: insertError } = await supabaseServer
     .from('proposal_generations')
@@ -184,8 +356,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       prompt_text: promptText,
       response_text: responseText,
       credits_spent: creditsToSpend,
-      model: 'local-stub',
-      metadata: { attachments, retrievedContext, template_id: templateId, rpc_tx: txId },
+      model: `${provider}:${model}`,
+      metadata: {
+        attachments,
+        spec_key: specData?.key || explicitSpecKey || 'default-proposal',
+        rpc_tx: txId,
+      },
     })
     .select()
     .single();
@@ -195,23 +371,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   if (section) {
-    await supabaseServer.from('proposal_sections').update({
-      content_md: responseText,
-      updated_at: new Date().toISOString(),
-    }).eq('id', section.id);
+    await supabaseServer
+      .from('proposal_sections')
+      .update({
+        content_md: responseText,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', section.id);
   }
 
-  await supabaseServer.from('wallet_transactions').insert({
-    user_id: user.id,
-    kind: 'spend',
-    credits_delta: -creditsToSpend,
-    cash_amount: 0,
-    currency: 'TZS',
-    status: 'completed',
-    provider: 'proposal-ai',
-    reference: inserted?.id ?? null,
-    metadata: { sectionKey },
+  return NextResponse.json({
+    generation: inserted,
+    responseText,
+    balance: (walletData?.balance_credits ?? 0) - creditsToSpend,
+    provider,
+    model,
   });
-
-  return NextResponse.json({ generation: inserted, responseText, balance: (walletData?.balance_credits ?? 0) - creditsToSpend });
 }

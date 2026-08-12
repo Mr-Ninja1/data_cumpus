@@ -10,6 +10,8 @@ import {
   Megaphone,
   Inbox,
   ArrowUpRight,
+  Wrench,
+  Image,
 } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
 
@@ -163,6 +165,32 @@ export default function AdminOverviewPage() {
             <div className="text-xs opacity-80 font-normal">Direct message students & staff</div>
           </div>
           <ArrowUpRight className="w-4 h-4 ml-auto opacity-70 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+        </Link>
+        <Link
+          href="/admin/systems"
+          className="group p-5 rounded-2xl border border-white/10 bg-slate-900/60 font-semibold inline-flex items-center gap-3 hover:bg-slate-900/90 transition-colors"
+        >
+          <div className="h-10 w-10 rounded-xl bg-white/5 flex items-center justify-center">
+            <Wrench className="w-5 h-5 text-emerald-400" />
+          </div>
+          <div>
+            <div className="text-sm text-white">System build requests</div>
+            <div className="text-xs text-slate-500 font-normal">Quotes &amp; FYP / app builds</div>
+          </div>
+          <ArrowUpRight className="w-4 h-4 ml-auto text-slate-600 group-hover:text-slate-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+        </Link>
+        <Link
+          href="/admin/proposals/assets"
+          className="group p-5 rounded-2xl border border-white/10 bg-slate-900/60 font-semibold inline-flex items-center gap-3 hover:bg-slate-900/90 transition-colors"
+        >
+          <div className="h-10 w-10 rounded-xl bg-white/5 flex items-center justify-center">
+            <Image className="w-5 h-5 text-cyan-300" />
+          </div>
+          <div>
+            <div className="text-sm text-white">School assets & guidance</div>
+            <div className="text-xs text-slate-500 font-normal">Logo, defaults, accepted samples, and structure guides</div>
+          </div>
+          <ArrowUpRight className="w-4 h-4 ml-auto text-slate-600 group-hover:text-slate-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
         </Link>
         <Link
           href="/admin/users"

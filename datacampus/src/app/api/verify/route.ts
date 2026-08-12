@@ -46,7 +46,6 @@ export async function POST(req: NextRequest) {
     full_name: body.extractedName || null,
     student_id: body.extractedStudentId || null,
     program: body.extractedProgram || null,
-    department: body.extractedDepartment || null,
     confidence,
     status,
   };
@@ -82,7 +81,7 @@ export async function POST(req: NextRequest) {
     
     const { data: existing, error: existingErr } = await supabaseServer
       .from('profiles')
-      .select('is_verified, full_name, student_id, program, department, verification_confidence')
+      .select('is_verified, full_name, student_id, program, verification_confidence')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -94,7 +93,6 @@ export async function POST(req: NextRequest) {
             full_name: insertPayload.full_name || existing?.full_name || null,
             student_id: insertPayload.student_id || existing?.student_id || null,
             program: insertPayload.program || existing?.program || null,
-            department: insertPayload.department || existing?.department || null,
             is_verified: true,
             verification_status: 'verified',
             verified_at: new Date().toISOString(),

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Bell, Loader2 } from "lucide-react";
+import { Loader2, UserPlus } from "lucide-react";
 import { useFollow } from "@/hooks/useFollow";
 
 type Props = {
@@ -31,9 +31,9 @@ export default function FollowButton({ userId, size = "md", className = "" }: Pr
       {busy ? (
         <Loader2 className="w-4 h-4 animate-spin" />
       ) : (
-        <Bell className={`w-4 h-4 ${isFollowing ? "fill-current" : ""}`} />
+        <UserPlus className="w-4 h-4" />
       )}
-      {loading ? "…" : isFollowing ? "Subscribed" : "Subscribe"}
+      {loading ? "…" : isFollowing ? "Following" : "Follow"}
     </button>
   );
 }

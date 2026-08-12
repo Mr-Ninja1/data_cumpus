@@ -8,6 +8,7 @@ import PaperCard from "@/components/PaperCard";
 import PaperFilters from "@/components/PaperFilters";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import EmptyState from "@/components/EmptyState";
+import { enrichEngagement, mapPaperRow, attachUploaders } from "@/utils/engagement";
 
 interface Paper {
   id: string;
@@ -17,6 +18,11 @@ interface Paper {
   title: string;
   fileUrl: string;
   uploadedAt: string;
+  uploadedBy?: string | null;
+  uploaderName?: string | null;
+  uploaderVerified?: boolean;
+  viewCount?: number;
+  likeCount?: number;
 }
 
 function SearchPageInner() {
@@ -65,17 +71,11 @@ function SearchPageInner() {
         console.error("Search error:", error.message);
         setPapers([]);
       } else {
-        setPapers(
-          (data || []).map((row: any) => ({
-            id: row.id,
-            school: row.school,
-            program: row.program,
-            type: row.type,
-            title: row.title,
-            fileUrl: row.file_url,
-            uploadedAt: row.uploaded_at,
-          }))
+        let mapped = await enrichEngagement(
+          (data || []).map((row: any) => mapPaperRow(row) as Paper)
         );
+        mapped = await attachUploaders(mapped);
+        setPapers(mapped);
       }
       setLoading(false);
     };
@@ -165,7 +165,13 @@ function SearchPageInner() {
                 title={paper.title}
                 program={paper.program}
                 type={paper.type}
+                school={paper.school}
                 uploadedAt={paper.uploadedAt}
+                uploadedBy={paper.uploadedBy}
+                uploaderName={paper.uploaderName}
+                viewCount={paper.viewCount}
+                likeCount={paper.likeCount}
+                uploaderVerified={paper.uploaderVerified}
                 variant="feed"
               />
             ))}
@@ -178,7 +184,13 @@ function SearchPageInner() {
                 title={paper.title}
                 program={paper.program}
                 type={paper.type}
+                school={paper.school}
                 uploadedAt={paper.uploadedAt}
+                uploadedBy={paper.uploadedBy}
+                uploaderName={paper.uploaderName}
+                viewCount={paper.viewCount}
+                likeCount={paper.likeCount}
+                uploaderVerified={paper.uploaderVerified}
               />
             ))}
           </div>

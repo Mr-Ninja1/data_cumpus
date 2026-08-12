@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -11,7 +13,6 @@ import {
   Megaphone,
   ScrollText,
   FileStack,
-  FileCode,
   Menu,
   X,
   LogOut,
@@ -19,12 +20,13 @@ import {
   Crown,
   Sparkles,
   ChevronRight,
+  Wrench,
 } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
 import { useProfile } from "@/hooks/useProfile";
 import Auth from "@/components/Auth";
 
-type NavItem = { href: string; label: string; icon: any; exact?: boolean };
+type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean };
 type NavGroup = { label: string; items: NavItem[] };
 
 const NAV_GROUPS: NavGroup[] = [
@@ -50,8 +52,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Proposal studio",
     items: [
-      { href: "/admin/proposals/templates", label: "Templates", icon: FileStack },
-      { href: "/admin/proposals/specs", label: "Specs", icon: FileCode },
+      { href: "/admin/proposals/assets", label: "Proposal setup", icon: FileStack },
+      { href: "/admin/systems", label: "System builds", icon: Wrench },
     ],
   },
   {
@@ -123,8 +125,8 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/admin";
   const router = useRouter();
-  const { isStaff, loading: profileLoading, role, displayName, userId } = useProfile();
-  const [session, setSession] = useState<any>(null);
+  const { isStaff, loading: profileLoading, role, displayName } = useProfile();
+  const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
@@ -164,9 +166,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     };
   }, [isStaff, pathname]);
 
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
 
   const signOut = async () => {
     await supabase.auth.signOut();

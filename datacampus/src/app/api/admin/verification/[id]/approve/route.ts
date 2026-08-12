@@ -39,7 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (newStatus === 'approved') {
     const { data: existing, error: existingErr } = await supabaseServer
       .from('profiles')
-      .select('is_verified, full_name, student_id, program, department, verification_confidence')
+      .select('is_verified, full_name, student_id, program, verification_confidence')
       .eq('id', sub.user_id)
       .maybeSingle();
 
@@ -51,7 +51,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             full_name: sub.full_name || existing?.full_name || null,
             student_id: sub.student_id || existing?.student_id || null,
             program: sub.program || existing?.program || null,
-            department: sub.department || existing?.department || null,
             is_verified: true,
             verification_status: 'verified',
             verified_at: new Date().toISOString(),

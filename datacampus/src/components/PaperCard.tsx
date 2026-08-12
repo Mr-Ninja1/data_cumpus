@@ -1,10 +1,10 @@
 "use client";
 import React from "react";
-import { FileText, Download, MoreVertical, Bookmark, ThumbsUp } from "lucide-react";
+import { FileText, MoreVertical, Download } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { downloadPaper } from "@/utils/downloadPaper";
 import { showToast } from "@/utils/toast";
-import { useLibrary } from "@/hooks/useLibrary";
+import { formatCount } from "@/utils/formatCount";
 import VerifiedBadge from "@/components/VerifiedBadge";
 
 interface PaperCardProps {
@@ -19,24 +19,23 @@ interface PaperCardProps {
   uploadedBy?: string | null;
   uploaderRole?: string | null;
   uploaderVerified?: boolean | null;
+  viewCount?: number | null;
+  likeCount?: number | null;
   variant?: "grid" | "shorts" | "feed";
 }
 
-const typeColors: Record<string, { bg: string; text: string; border: string }> = {
+const typeColors: Record<string, { bg: string; text: string }> = {
   Exam: {
-    bg: "bg-blue-50 dark:bg-blue-900/20",
+    bg: "bg-blue-50 dark:bg-blue-900/30",
     text: "text-blue-700 dark:text-blue-200",
-    border: "border-blue-200/90 dark:border-blue-800/60",
   },
   Test: {
-    bg: "bg-amber-50 dark:bg-amber-900/20",
+    bg: "bg-amber-50 dark:bg-amber-900/30",
     text: "text-amber-700 dark:text-amber-200",
-    border: "border-amber-200/90 dark:border-amber-800/60",
   },
   Material: {
-    bg: "bg-emerald-50 dark:bg-emerald-900/20",
+    bg: "bg-emerald-50 dark:bg-emerald-900/30",
     text: "text-emerald-700 dark:text-emerald-200",
-    border: "border-emerald-200/90 dark:border-emerald-800/60",
   },
 };
 
@@ -68,22 +67,19 @@ export default function PaperCard({
   title,
   program,
   type,
-  school,
   thumbnailUrl,
   uploadedAt,
   uploaderName,
   uploadedBy,
   uploaderRole,
-  uploaderVerified,
+  uploaderVerified = false,
+  viewCount = 0,
   variant = "grid",
 }: PaperCardProps) {
   const router = useRouter();
-  const { isSaved, isLiked, toggleSave, toggleLike } = useLibrary();
   const colors = typeColors[type] || typeColors.Material;
-  const saved = isSaved(id);
-  const liked = isLiked(id);
   const channel = uploaderName || program || "DataCampus";
-  const interestMeta = { program, school, type };
+  const views = Math.max(0, Number(viewCount) || 0);
 
   const handleClick = () => router.push(`/paper/${id}`);
 
@@ -102,108 +98,117 @@ export default function PaperCard({
     if (uploadedBy) router.push(`/u/${uploadedBy}`);
   };
 
+  const metaLine = (
+    <>
+      <button
+        type="button"
+        onClick={openChannel}
+        className="inline-flex max-w-full items-center gap-1 hover:text-gray-800 dark:hover:text-gray-200"
+      >
+        <span className="truncate">{channel}</span>
+        <VerifiedBadge
+          role={uploaderRole}
+          isVerified={uploaderVerified}
+          size="xs"
+          className="shrink-0"
+        />
+      </button>
+      <span className="mx-1">·</span>
+      <span className="shrink-0">{formatCount(views)} views</span>
+      {uploadedAt ? (
+        <>
+          <span className="mx-1">·</span>
+          <span className="shrink-0">{relativeDate(uploadedAt)}</span>
+        </>
+      ) : null}
+    </>
+  );
+
   if (variant === "shorts") {
     return (
       <div
         onClick={handleClick}
-        className="relative rounded-xl overflow-hidden bg-gray-900 cursor-pointer active:scale-[0.99] transition-transform"
+        className="relative cursor-pointer overflow-hidden rounded-xl bg-gray-900 transition-transform active:scale-[0.99]"
       >
         <div className="aspect-[9/16] w-full bg-gradient-to-br from-gray-700 to-gray-900">
           {thumbnailUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={thumbnailUrl} alt={title} className="object-cover w-full h-full" loading="lazy" />
+            <img src={thumbnailUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
           ) : (
-            <div className="h-full w-full flex items-center justify-center">
-              <FileText className="text-white/50 w-10 h-10" />
+            <div className="flex h-full w-full items-center justify-center">
+              <FileText className="h-10 w-10 text-white/50" />
             </div>
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
         </div>
-        <div className="absolute left-2.5 right-2.5 bottom-2.5 space-y-1">
-          <span className={`inline-flex px-2 py-0.5 text-[10px] font-semibold rounded ${colors.bg} ${colors.text}`}>
+        <div className="absolute bottom-2.5 left-2.5 right-2.5 space-y-1">
+          <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${colors.bg} ${colors.text}`}>
             {type}
           </span>
-          <div className="text-[13px] font-semibold leading-snug text-white line-clamp-2">{title}</div>
+          <div className="line-clamp-2 text-[13px] font-semibold leading-snug text-white">{title}</div>
+          <div className="text-[11px] text-white/75">{formatCount(views)} views</div>
         </div>
       </div>
     );
   }
 
-  // YouTube-style mobile feed card (also used as default on mobile via home page)
-  if (variant === "feed") {
-    return (
-      <article
-        onClick={handleClick}
-        className="bg-white dark:bg-gray-950 cursor-pointer active:bg-gray-50 dark:active:bg-gray-900/80 transition-colors"
+  // YouTube feed + grid: thumbnail → avatar + title → channel ✓ · views · date
+  return (
+    <article
+      onClick={handleClick}
+      className={`cursor-pointer transition-colors ${
+        variant === "feed"
+          ? "bg-white active:bg-gray-50 dark:bg-gray-950 dark:active:bg-gray-900/80"
+          : "group"
+      }`}
+    >
+      <div
+        className={`relative aspect-video w-full overflow-hidden bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-800 dark:to-gray-900 ${
+          variant === "feed" ? "" : "rounded-xl"
+        }`}
       >
-        <div className="relative aspect-video w-full bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-800 dark:to-gray-900">
-          {thumbnailUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={thumbnailUrl} alt={title} className="object-cover w-full h-full" loading="lazy" />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <FileText className="text-gray-400 dark:text-gray-600 w-14 h-14" />
-            </div>
-          )}
-          <span className="absolute bottom-2 right-2 bg-black/80 text-white text-[11px] font-semibold px-1.5 py-0.5 rounded">
-            PDF
-          </span>
-          <span className={`absolute top-2 left-2 text-[10px] font-semibold px-1.5 py-0.5 rounded ${colors.bg} ${colors.text}`}>
-            {type}
-          </span>
-        </div>
+        {thumbnailUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumbnailUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <FileText className="h-12 w-12 text-gray-400 dark:text-gray-600 sm:h-14 sm:w-14" />
+          </div>
+        )}
+        <span className="absolute bottom-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold text-white">
+          PDF
+        </span>
+        <span
+          className={`absolute left-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold ${colors.bg} ${colors.text}`}
+        >
+          {type}
+        </span>
+      </div>
 
-        <div className="flex gap-3 px-3 pt-3 pb-4">
-          <button
-            type="button"
-            onClick={openChannel}
-            className="flex-shrink-0 h-9 w-9 rounded-full bg-gradient-to-br from-red-500 to-rose-600 text-white text-xs font-bold flex items-center justify-center"
-            aria-label="Channel"
-          >
-            {initials(channel)}
-          </button>
+      <div className={`flex gap-3 ${variant === "feed" ? "px-3 pb-4 pt-3" : "pt-3"}`}>
+        <button
+          type="button"
+          onClick={openChannel}
+          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-600 text-xs font-bold text-white"
+          aria-label="Channel"
+        >
+          {initials(channel)}
+        </button>
 
-          <div className="min-w-0 flex-1">
-            <h3 className="text-[15px] font-medium leading-snug text-gray-900 dark:text-gray-50 line-clamp-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-1">
+            <h3 className="line-clamp-2 flex-1 text-[15px] font-medium leading-snug text-gray-900 dark:text-gray-50">
               {title}
             </h3>
-            <p className="mt-1 text-[12px] text-gray-500 dark:text-gray-400 leading-snug line-clamp-1">
-              <button type="button" onClick={openChannel} className="hover:text-gray-700 dark:hover:text-gray-300 inline-flex items-center">
-                {channel}
-                <VerifiedBadge role={uploaderRole} isVerified={uploaderVerified} size="xs" className="ml-0.5" />
-              </button>
-              {" · "}
-              {program}
-              {uploadedAt ? ` · ${relativeDate(uploadedAt)}` : ""}
-            </p>
-          </div>
-
-          <div className="flex-shrink-0 relative">
-            <details className="relative" onClick={(e) => e.stopPropagation()}>
-              <summary className="list-none p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer [&::-webkit-details-marker]:hidden">
+            <details className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+              <summary className="cursor-pointer list-none rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-800 [&::-webkit-details-marker]:hidden">
                 <MoreVertical size={18} className="text-gray-600 dark:text-gray-400" />
               </summary>
-              <div className="absolute right-0 top-8 z-20 w-40 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg py-1">
-                <button
-                  type="button"
-                  onClick={() => toggleSave(id, interestMeta)}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  <Bookmark size={16} className={saved ? "fill-current" : ""} />
-                  {saved ? "Saved" : "Save"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleLike(id, interestMeta)}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  <ThumbsUp size={16} className={liked ? "fill-current" : ""} />
-                  {liked ? "Liked" : "Like"}
-                </button>
+              <div className="absolute right-0 top-8 z-20 w-40 rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-800 dark:bg-gray-900">
                 <button
                   type="button"
                   onClick={handleDownload}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
                   <Download size={16} />
                   Download
@@ -211,107 +216,11 @@ export default function PaperCard({
               </div>
             </details>
           </div>
-        </div>
-      </article>
-    );
-  }
-
-  // Desktop / tablet grid card
-  return (
-    <div
-      onClick={handleClick}
-      className="bg-white dark:bg-gray-950 rounded-2xl border border-gray-200 dark:border-gray-800 transition-shadow duration-200 cursor-pointer overflow-hidden group hover:shadow-md active:scale-[0.995]"
-    >
-      <div className="aspect-video bg-gradient-to-br from-stone-100 to-stone-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center relative overflow-hidden">
-        {thumbnailUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={thumbnailUrl}
-            alt={title}
-            className="object-cover w-full h-full transition-transform duration-300"
-            loading="lazy"
-          />
-        ) : (
-          <div className="relative">
-            <FileText className="text-gray-400 dark:text-gray-600 w-16 h-16 transition-transform duration-300" />
-          </div>
-        )}
-        <span className="absolute top-3 right-3 bg-white/80 dark:bg-gray-900/60 backdrop-blur border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-100 text-[11px] font-semibold px-2 py-1 rounded-lg">
-          PDF
-        </span>
-        <details className="absolute top-3 left-3" onClick={(e) => e.stopPropagation()}>
-          <summary className="list-none p-1.5 rounded-full bg-white/80 dark:bg-gray-900/60 backdrop-blur border border-gray-200 dark:border-gray-800 hover:bg-white dark:hover:bg-gray-800 cursor-pointer [&::-webkit-details-marker]:hidden">
-            <MoreVertical size={18} className="text-gray-600 dark:text-gray-300" />
-          </summary>
-          <div className="absolute left-0 top-8 z-20 w-44 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg py-1">
-            <button
-              type="button"
-              onClick={() => toggleSave(id, interestMeta)}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              <Bookmark size={16} />
-              {saved ? "Saved" : "Save"}
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleLike(id, interestMeta)}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              <ThumbsUp size={16} />
-              {liked ? "Liked" : "Like"}
-            </button>
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              <Download size={16} />
-              Download
-            </button>
-          </div>
-        </details>
-      </div>
-
-      <div className="p-3 sm:p-4">
-        <div className="flex items-start gap-3">
-          <button
-            type="button"
-            onClick={openChannel}
-            className="mt-0.5 flex-shrink-0 h-9 w-9 rounded-full bg-gradient-to-br from-violet-600 to-cyan-500 text-white text-xs font-bold flex items-center justify-center"
-            aria-label="Open uploader profile"
-          >
-            {initials(channel)}
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="mb-2 flex items-center gap-2">
-              <span className={`inline-block px-2.5 py-0.5 text-[11px] font-semibold rounded-full border ${colors.bg} ${colors.text} ${colors.border}`}>
-                {type}
-              </span>
-              {school && (
-                <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                  {school}
-                </span>
-              )}
-            </div>
-            <h3 className="font-semibold text-[15px] sm:text-base line-clamp-2 mb-1.5 text-gray-900 dark:text-gray-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-              {title}
-            </h3>
-            <div className="text-sm text-gray-600 dark:text-gray-300 truncate flex items-center">
-              <span className="truncate">{channel}</span>
-              <VerifiedBadge role={uploaderRole} isVerified={uploaderVerified} size="xs" className="ml-0.5" />
-            </div>
-            <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-              <span className="truncate">{program}</span>
-              {uploadedAt && (
-                <>
-                  <span>·</span>
-                  <span className="flex-shrink-0">{relativeDate(uploadedAt)}</span>
-                </>
-              )}
-            </div>
-          </div>
+          <p className="mt-1 flex flex-wrap items-center text-[12px] leading-snug text-gray-500 dark:text-gray-400">
+            {metaLine}
+          </p>
         </div>
       </div>
-    </div>
+    </article>
   );
 }

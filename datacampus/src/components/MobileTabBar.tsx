@@ -1,33 +1,44 @@
 "use client";
 
 import React from "react";
-import { Home, Search, Plus, User, Users, Wallet, FilePlus2 } from "lucide-react";
-import { useRouter, usePathname } from "next/navigation";
+import { Home, Search, User, MessageCircle, Users } from "lucide-react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useNotifications } from "@/hooks/useNotifications";
+import { useMessages } from "@/hooks/useMessages";
+import AiLogo from "@/components/AiLogo";
 
 export default function MobileTabBar() {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { unreadCount: notificationUnread } = useNotifications();
+  const { unreadCount: messageUnread } = useMessages();
 
   const isHome = pathname === "/";
   const isSearch = pathname.startsWith("/search");
-  const isUpload = pathname.startsWith("/upload");
+  const isWorkspace = pathname.startsWith("/workspace");
   const isPeople = pathname.startsWith("/people");
-  const isWallet = pathname.startsWith("/wallet");
-  const isProposals = pathname.startsWith("/workspace/proposals");
+  const isChat =
+    pathname.startsWith("/inbox") || pathname.startsWith("/notifications");
   const isProfile = pathname.startsWith("/profile") || pathname.startsWith("/u/");
+  const chatBadge = notificationUnread + messageUnread;
+  const inActiveChat = Boolean(
+    searchParams.get("peer") &&
+      (pathname.startsWith("/people") || pathname.startsWith("/inbox"))
+  );
 
   // Admin gets its own dedicated Control Center shell — no public tab bar there
-  if (pathname.startsWith("/admin")) {
+  if (pathname.startsWith("/admin") || inActiveChat) {
     return null;
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 pb-[env(safe-area-inset-bottom)]">
-      <div className="flex items-end justify-around h-[56px] px-1">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden border-t border-gray-200/90 bg-white/95 backdrop-blur-md dark:border-gray-800 dark:bg-gray-950/95 pb-[env(safe-area-inset-bottom)]">
+      <div className="flex h-[56px] items-end justify-around px-1">
         <button
           type="button"
           onClick={() => router.push("/")}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 ${
+          className={`flex h-full flex-1 flex-col items-center justify-center gap-0.5 ${
             isHome ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
           }`}
           aria-label="Home"
@@ -40,7 +51,7 @@ export default function MobileTabBar() {
         <button
           type="button"
           onClick={() => router.push("/search")}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 ${
+          className={`flex h-full flex-1 flex-col items-center justify-center gap-0.5 ${
             isSearch ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
           }`}
           aria-label="Search"
@@ -50,68 +61,73 @@ export default function MobileTabBar() {
           <span className="text-[10px] font-medium">Search</span>
         </button>
 
-        {/* YouTube-style center create */}
         <button
           type="button"
-          onClick={() => router.push("/upload")}
-          className="flex flex-col items-center justify-center flex-1 h-full -mt-1"
-          aria-label="Upload"
-          aria-current={isUpload ? "page" : undefined}
+          onClick={() => router.push("/workspace")}
+          className={`flex h-full flex-1 -mt-0.5 flex-col items-center justify-center gap-0.5 ${
+            isWorkspace ? "text-indigo-600 dark:text-indigo-400" : "text-gray-500 dark:text-gray-400"
+          }`}
+          aria-label="Work"
+          aria-current={isWorkspace ? "page" : undefined}
         >
-          <div
-            className={`h-10 w-10 rounded-full border-2 flex items-center justify-center ${
-              isUpload
-                ? "border-gray-900 dark:border-white bg-gray-900 dark:bg-white text-white dark:text-gray-900"
-                : "border-gray-400 dark:border-gray-500 text-gray-700 dark:text-gray-300"
+          <span
+            className={`flex h-9 w-9 items-center justify-center rounded-xl transition-transform ${
+              isWorkspace ? "scale-105 ring-2 ring-indigo-500/40" : ""
             }`}
           >
-            <Plus size={26} strokeWidth={2} />
-          </div>
+            <AiLogo size={32} />
+          </span>
+          <span className="text-[10px] font-semibold">Work</span>
         </button>
 
         <button
           type="button"
           onClick={() => router.push("/people")}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 ${
+          className={`relative flex h-full flex-1 flex-col items-center justify-center gap-0.5 ${
             isPeople ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
           }`}
           aria-label="People"
           aria-current={isPeople ? "page" : undefined}
         >
-          <Users size={22} strokeWidth={isPeople ? 2.5 : 1.75} />
+          <span className="relative inline-flex">
+            <Users size={22} strokeWidth={isPeople ? 2.5 : 1.75} />
+            {messageUnread > 0 && (
+              <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-white">
+                {messageUnread > 9 ? "9+" : messageUnread}
+              </span>
+            )}
+          </span>
           <span className="text-[10px] font-medium">People</span>
         </button>
 
         <button
           type="button"
-          onClick={() => router.push("/wallet")}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 ${
-            isWallet ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
+          onClick={() => router.push("/inbox?tab=messages")}
+          className={`relative flex h-full flex-1 flex-col items-center justify-center gap-0.5 ${
+            isChat ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
           }`}
-          aria-label="Wallet"
-          aria-current={isWallet ? "page" : undefined}
+          aria-label="Messages"
+          aria-current={isChat ? "page" : undefined}
         >
-          <Wallet size={22} strokeWidth={isWallet ? 2.5 : 1.75} />
-          <span className="text-[10px] font-medium">Wallet</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => router.push("/workspace/proposals")}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 ${
-            isProposals ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
-          }`}
-          aria-label="Proposals"
-          aria-current={isProposals ? "page" : undefined}
-        >
-          <FilePlus2 size={22} strokeWidth={isProposals ? 2.5 : 1.75} />
-          <span className="text-[10px] font-medium">Proposals</span>
+          <span className="relative inline-flex">
+            <MessageCircle
+              size={22}
+              strokeWidth={isChat ? 2.5 : 1.75}
+              fill={isChat ? "currentColor" : "none"}
+            />
+            {chatBadge > 0 && (
+              <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                {chatBadge > 9 ? "9+" : chatBadge}
+              </span>
+            )}
+          </span>
+          <span className="text-[10px] font-medium">Chat</span>
         </button>
 
         <button
           type="button"
           onClick={() => router.push("/profile")}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 ${
+          className={`flex h-full flex-1 flex-col items-center justify-center gap-0.5 ${
             isProfile ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"
           }`}
           aria-label="You"

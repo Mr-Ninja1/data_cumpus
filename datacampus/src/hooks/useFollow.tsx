@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/utils/supabaseClient";
 import { showToast } from "@/utils/toast";
+import { useProfile } from "@/hooks/useProfile";
+import { openVerifyPrompt } from "@/utils/verificationGate";
 
 export function useFollow(targetUserId: string | null | undefined) {
+  const { canUseSocialFeatures } = useProfile();
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followerCount, setFollowerCount] = useState(0);
@@ -57,11 +60,18 @@ export function useFollow(targetUserId: string | null | undefined) {
   const toggleFollow = async () => {
     if (!targetUserId) return;
     if (!currentUserId) {
-      showToast("info", "Sign in to follow channels");
+      showToast("info", "Sign in to follow people");
       await supabase.auth.signInWithOAuth({ provider: "google" });
       return;
     }
     if (currentUserId === targetUserId) return;
+
+    // Unfollow always allowed; new follows require verification (staff bypass)
+    if (!isFollowing && !canUseSocialFeatures) {
+      showToast("info", "Verify your student status to follow people");
+      openVerifyPrompt("follow");
+      return;
+    }
 
     setBusy(true);
     try {
@@ -74,7 +84,7 @@ export function useFollow(targetUserId: string | null | undefined) {
         if (error) throw error;
         setIsFollowing(false);
         setFollowerCount((c) => Math.max(0, c - 1));
-        showToast("success", "Unsubscribed");
+        showToast("success", "Unfollowed");
       } else {
         // Routed through the server so a follow fee (if the channel has set
         // one) can be enforced honestly, and blocked users can't follow.
@@ -90,17 +100,17 @@ export function useFollow(targetUserId: string | null | undefined) {
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(json?.error || "Could not subscribe");
+          throw new Error(json?.error || "Could not follow");
         }
         setIsFollowing(true);
         setFollowerCount((c) => c + 1);
         showToast(
           "success",
-          json?.feeCharged > 0 ? `Subscribed — paid ${json.feeCharged} credits` : "Subscribed"
+          json?.feeCharged > 0 ? `Following — paid ${json.feeCharged} credits` : "Following"
         );
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Could not update subscription";
+      const msg = e instanceof Error ? e.message : "Could not update follow";
       showToast("error", msg.includes("follows") ? "Run wave_c migration in Supabase first" : msg);
       void refresh();
     } finally {

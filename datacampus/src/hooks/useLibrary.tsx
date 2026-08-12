@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from "r
 import { supabase } from "@/utils/supabaseClient";
 import { showToast } from "@/utils/toast";
 import { bumpInterest } from "@/utils/interests";
+import { openVerifyPrompt, canUseSocialFeatures } from "@/utils/verificationGate";
 
 type InterestMeta = { program?: string; school?: string; type?: string };
 
@@ -10,7 +11,7 @@ type LibraryState = {
   saves: string[];
   likes: string[];
   toggleSave: (paperId: string, meta?: InterestMeta) => void;
-  toggleLike: (paperId: string, meta?: InterestMeta) => void;
+  toggleLike: (paperId: string, meta?: InterestMeta) => boolean;
   isSaved: (paperId: string) => boolean;
   isLiked: (paperId: string) => boolean;
   loading: boolean;
@@ -22,7 +23,7 @@ const LibraryContext = createContext<LibraryState>({
   saves: [],
   likes: [],
   toggleSave: () => {},
-  toggleLike: () => {},
+  toggleLike: () => false,
   isSaved: () => false,
   isLiked: () => false,
   loading: true,
@@ -113,8 +114,10 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const [likes, setLikes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [dbReady, setDbReady] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
   const userIdRef = useRef<string | null>(null);
   const dbReadyRef = useRef(false);
+  const isVerifiedRef = useRef(false);
 
   useEffect(() => {
     userIdRef.current = userId;
@@ -124,6 +127,10 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     dbReadyRef.current = dbReady;
   }, [dbReady]);
 
+  useEffect(() => {
+    isVerifiedRef.current = isVerified;
+  }, [isVerified]);
+
   const loadForUser = async (uid: string | null) => {
     setLoading(true);
 
@@ -131,9 +138,21 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       setSaves(readIds(storageKey("saves", null)));
       setLikes(readIds(storageKey("likes", null)));
       setDbReady(false);
+      setIsVerified(false);
       setLoading(false);
       return;
     }
+
+    const { data: me } = await supabase
+      .from("profiles")
+      .select("is_verified, verification_status, role")
+      .eq("id", uid)
+      .maybeSingle();
+    const verified = canUseSocialFeatures(
+      Boolean(me?.is_verified) || me?.verification_status === "verified",
+      me?.role
+    );
+    setIsVerified(verified);
 
     // Optimistic local cache while DB loads
     const localSaves = readIds(storageKey("saves", uid));
@@ -163,16 +182,18 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Migrate any guest + local IDs missing from DB
+    // Migrate saves always; likes only when verified (staff bypasses verification)
     const toSyncSaves = mergeUnique(guestSaves, localSaves).filter((id) => !dbSaves.includes(id));
-    const toSyncLikes = mergeUnique(guestLikes, localLikes).filter((id) => !dbLikes.includes(id));
+    const toSyncLikes = verified
+      ? mergeUnique(guestLikes, localLikes).filter((id) => !dbLikes.includes(id))
+      : [];
     await Promise.all([
       upsertDbRows("saves", uid, toSyncSaves),
       upsertDbRows("likes", uid, toSyncLikes),
     ]);
 
     const mergedSaves = mergeUnique(toSyncSaves, dbSaves);
-    const mergedLikes = mergeUnique(toSyncLikes, dbLikes);
+    const mergedLikes = verified ? mergeUnique(toSyncLikes, dbLikes) : dbLikes;
     writeIds(storageKey("saves", uid), mergedSaves);
     writeIds(storageKey("likes", uid), mergedLikes);
     setSaves(mergedSaves);
@@ -231,11 +252,26 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const toggleLike = (paperId: string, meta?: InterestMeta) => {
+  const toggleLike = (paperId: string, meta?: InterestMeta): boolean => {
     const uid = userIdRef.current;
     const useDb = dbReadyRef.current && Boolean(uid);
+    const verified = isVerifiedRef.current;
+
+    // Guests and unverified signed-in users can only browse — no likes
+    if (!uid || !verified) {
+      if (!uid) {
+        showToast("info", "Sign in and verify to like papers");
+      } else {
+        showToast("info", "Verify your student status to like papers");
+      }
+      openVerifyPrompt("like");
+      return false;
+    }
+
+    let didChange = false;
     setLikes((prev) => {
       const adding = !prev.includes(paperId);
+      didChange = true;
       const next = adding ? [paperId, ...prev] : prev.filter((id) => id !== paperId);
       writeIds(storageKey("likes", uid), next);
       if (adding) bumpMeta(meta);
@@ -248,9 +284,15 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
         void (adding
           ? upsertDbRows("likes", uid, [paperId])
           : deleteDbRow("likes", uid, paperId));
+        // Keep denormalized like_count in sync when migration is applied
+        void supabase.rpc("adjust_paper_likes", {
+          p_id: paperId,
+          delta: adding ? 1 : -1,
+        });
       }
       return next;
     });
+    return didChange;
   };
 
   return (

@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
         kind: "support",
         conversation_key: key,
         read: false,
-        metadata: { support: true },
+        metadata: { support: true, preview: text.slice(0, 100), local_first: false },
       })
       .select("id, conversation_key")
       .single();
@@ -71,6 +71,8 @@ export async function POST(req: NextRequest) {
       link: "/admin/inbox",
       data: { message_id: msg.id, from: user.id },
     });
+
+    // Support keeps body in DB for staff tools (not local-first ephemeral)
 
     return NextResponse.json({ ok: true, messageId: msg.id, conversationKey: msg.conversation_key });
   } catch (e: unknown) {

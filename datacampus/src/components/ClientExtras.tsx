@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 import { showToast } from "@/utils/toast";
+import VerifyPromptModal from "@/components/VerifyPromptModal";
 
 const EARNING_LABELS: Record<string, string> = {
   transfer_in: "You received credits from a friend",
@@ -13,9 +14,8 @@ const EARNING_LABELS: Record<string, string> = {
 };
 
 /**
- * Soft welcome: no forced school/program gate.
+ * Soft welcome tip + verification prompt host + live earning toasts.
  * Users land on the full catalog; personalization learns from use.
- * Optional gentle tip after a delay, once, dismissible.
  */
 export default function ClientExtras() {
   const pathname = usePathname();
@@ -75,24 +75,30 @@ export default function ClientExtras() {
     }
   }, []);
 
-  if (pathname?.startsWith("/admin")) return null;
-  if (!showTip) return null;
+  if (pathname?.startsWith("/admin")) {
+    return <VerifyPromptModal />;
+  }
 
   return (
-    <div className="fixed inset-x-3 bottom-[4.75rem] md:inset-x-auto md:bottom-6 md:left-1/2 md:-translate-x-1/2 md:w-[24rem] z-[60] pointer-events-none">
-      <div className="w-full pointer-events-auto rounded-2xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 shadow-xl p-4 border border-white/10 dark:border-gray-300">
-        <p className="text-sm font-medium leading-snug mb-1">Browse everything — we&apos;ll adapt</p>
-        <p className="text-xs opacity-80 leading-relaxed mb-3">
-          No need to pick a program first. Save or open papers you care about and DataCampus will gently surface more like them.
-        </p>
-        <button
-          type="button"
-          onClick={dismiss}
-          className="w-full py-2 rounded-xl bg-white/15 dark:bg-gray-900/10 text-sm font-medium hover:bg-white/25 dark:hover:bg-gray-900/20 transition-colors"
-        >
-          Got it
-        </button>
-      </div>
-    </div>
+    <>
+      <VerifyPromptModal />
+      {showTip ? (
+        <div className="fixed inset-x-3 bottom-[4.75rem] md:inset-x-auto md:bottom-6 md:left-1/2 md:-translate-x-1/2 md:w-[24rem] z-[60] pointer-events-none">
+          <div className="w-full pointer-events-auto rounded-2xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 shadow-xl p-4 border border-white/10 dark:border-gray-300">
+            <p className="text-sm font-medium leading-snug mb-1">Browse everything — we&apos;ll adapt</p>
+            <p className="text-xs opacity-80 leading-relaxed mb-3">
+              No need to pick a program first. Save or open papers you care about and DataCampus will gently surface more like them.
+            </p>
+            <button
+              type="button"
+              onClick={dismiss}
+              className="w-full py-2 rounded-xl bg-white/15 dark:bg-gray-900/10 text-sm font-medium hover:bg-white/25 dark:hover:bg-gray-900/20 transition-colors"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
