@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthedUser } from '@/utils/serverAuth';
 import { supabaseServer } from '@/utils/supabaseServerClient';
-import { discoverReferencesForTitle } from '@/utils/referenceDiscovery';
+import { discoverReferencesForTitle, mergeReferencesPreservingOrder } from '@/utils/referenceDiscovery';
 
 export const runtime = 'nodejs';
 
@@ -31,11 +31,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const { references, lookup } = await discoverReferencesForTitle(String(project.title || ''));
+  const mergedReferences = mergeReferencesPreservingOrder(currentReferences as any[], references as any[]);
 
   const nextMetadata = {
     ...metadata,
-    references,
-    reference_lookup: lookup,
+    references: mergedReferences,
+    reference_lookup: {
+      ...lookup,
+      message: currentReferences.length && mergedReferences.length > currentReferences.length
+        ? `${lookup.message} Kept your existing reference order and appended ${mergedReferences.length - currentReferences.length} new reference${mergedReferences.length - currentReferences.length === 1 ? '' : 's'} to avoid renumbering existing citations.`
+        : currentReferences.length
+          ? `${lookup.message} Existing reference order was preserved to avoid renumbering citations already used in drafted chapters.`
+          : lookup.message,
+    },
   };
 
   await supabaseServer
@@ -45,5 +53,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .eq('user_id', user.id);
 
   const status = lookup.status === 'failed' ? 500 : 200;
-  return NextResponse.json({ references, message: lookup.message, status: lookup.status }, { status });
+  return NextResponse.json({ references: mergedReferences, message: nextMetadata.reference_lookup.message, status: lookup.status }, { status });
 }

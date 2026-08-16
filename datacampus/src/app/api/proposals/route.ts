@@ -5,6 +5,7 @@ import { loadWorkspaceSchoolSettings } from '@/utils/workspaceSchoolSettings';
 import { runModel } from '@/utils/models';
 import { discoverReferencesForTitle } from '@/utils/referenceDiscovery';
 import { refineProjectTitle } from '@/utils/projectTitle';
+import { getRequiredFrontMatter } from '@/utils/proposalTools';
 
 export const runtime = 'nodejs';
 
@@ -123,6 +124,9 @@ export async function POST(req: NextRequest) {
         stage,
         workflow_mode: workflowMode,
         doc_type: 'project_proposal',
+        // Ordered array, not hardcoded positions — this is what
+        // update_front_matter_order edits, and what assembleDocument reads.
+        front_matter_order: getRequiredFrontMatter(stage),
         original_title: titleRefinement?.wasRefined ? titleRefinement.originalTitle : undefined,
         title_refined: Boolean(titleRefinement?.wasRefined),
         chapters: chapterDefs.map((chapter, index) => ({

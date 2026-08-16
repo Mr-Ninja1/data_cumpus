@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthedUser } from '@/utils/serverAuth';
 import { supabaseServer } from '@/utils/supabaseServerClient';
 import { isInitialProposalReady } from '@/utils/proposalFlow';
+import { getRequiredFrontMatter } from '@/utils/proposalTools';
 
 export const runtime = 'nodejs';
 
@@ -79,10 +80,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  // Add the newly-required full_project front matter (abstract,
+  // acknowledgement) to whatever order already exists, instead of
+  // overwriting any custom ordering the student already set.
+  const existingOrder = Array.isArray(metadata.front_matter_order)
+    ? (metadata.front_matter_order as string[])
+    : getRequiredFrontMatter('initial_proposal');
+  const missingFrontMatter = getRequiredFrontMatter('full_project').filter((key) => !existingOrder.includes(key));
+  const nextFrontMatterOrder = [...existingOrder, ...missingFrontMatter];
+
   const nextMetadata = {
     ...metadata,
     stage: 'full_project',
     chapters: nextChapters,
+    front_matter_order: nextFrontMatterOrder,
     workflow: {
       ...((metadata.workflow as Record<string, unknown>) || {}),
       mode: metadata.workflow_mode || (metadata.workflow as Record<string, unknown>)?.mode || 'chat_to_work',

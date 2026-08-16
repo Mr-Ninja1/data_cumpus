@@ -157,6 +157,37 @@ async function searchCrossref(query: string, useTitleField: boolean, rows = 6): 
  * "Find references" action and the auto-start-on-creation flow stay
  * consistent.
  */
+function referenceIdentity(ref: { doi?: string; title?: string | null }) {
+  const doi = String(ref?.doi || '').trim().toLowerCase();
+  if (doi) return `doi:${doi}`;
+  const title = String(ref?.title || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return title ? `title:${title}` : '';
+}
+
+export function mergeReferencesPreservingOrder<T extends { doi?: string; title?: string | null }>(
+  existing: T[] = [],
+  discovered: T[] = []
+): T[] {
+  const merged: T[] = [];
+  const seen = new Set<string>();
+
+  for (const ref of existing) {
+    const key = referenceIdentity(ref);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(ref);
+  }
+
+  for (const ref of discovered) {
+    const key = referenceIdentity(ref);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(ref);
+  }
+
+  return merged;
+}
+
 export async function discoverReferencesForTitle(title: string): Promise<{
   references: DiscoveredReference[];
   lookup: ReferenceLookupResult;

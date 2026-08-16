@@ -5,6 +5,10 @@ type RunModelOpts = {
   system?: string;
   messages?: { role: "system" | "user" | "assistant"; content: string }[];
   maxTokens?: number;
+  // When the caller's own request is aborted (e.g. the user hits Stop),
+  // this cancels the outgoing LLM call too, instead of letting it keep
+  // running/costing money after nobody is waiting for the result.
+  signal?: AbortSignal;
 };
 
 function flattenMessages(opts: RunModelOpts) {
@@ -41,6 +45,7 @@ async function runGeminiGenerateContent(opts: RunModelOpts): Promise<string> {
       "Content-Type": "application/json",
       ...(useGoogleApi ? {} : { Authorization: `Bearer ${key}` }),
     },
+    signal: opts.signal,
     body: JSON.stringify(
       useGoogleApi
         ? {
@@ -98,6 +103,7 @@ async function runClaudeMessages(opts: RunModelOpts): Promise<string> {
       "x-api-key": key,
       "anthropic-version": process.env.ANTHROPIC_VERSION || "2023-06-01",
     },
+    signal: opts.signal,
     body: JSON.stringify({
       model,
       system: opts.system || undefined,

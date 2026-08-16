@@ -7,11 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "jest",
     "copy-pdf-worker": "node ./scripts/copy-pdf-worker.js",
-    "postinstall": "node ./scripts/copy-pdf-worker.js || true"
+    "postinstall": "node ./scripts/copy-pdf-worker.js || true",
+    "seed-proposal-spec": "node ./scripts/seed-proposal-spec.js",
+    "autopilot-worker": "node ./scripts/autopilot-worker.js"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@supabase/supabase-js": "^2.96.0",
+    "docx": "^9.7.1",
     "firebase": "^12.9.0",
     "lucide-react": "^0.572.0",
     "mammoth": "^1.9.0",
@@ -24,13 +29,16 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "jest": "^30.4.2",
     "tailwindcss": "^4",
+    "ts-jest": "^29.4.12",
     "typescript": "^5"
   }
 }

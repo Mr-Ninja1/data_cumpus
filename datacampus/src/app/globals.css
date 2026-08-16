@@ -323,3 +323,52 @@ html {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Renders converted chapter markdown (headings/lists/emphasis) as a real,
+   print-like document instead of plain markdown symbols — used by the
+   in-app chapter preview. Tailwind's preflight strips default heading/list
+   styling, so this scopes it back for just this rendered content. */
+.proposal-doc-preview h2,
+.proposal-doc-preview h3,
+.proposal-doc-preview h4,
+.proposal-doc-preview h5,
+.proposal-doc-preview h6 {
+  font-weight: 700;
+  line-height: 1.3;
+  color: #0f172a;
+}
+.proposal-doc-preview h2 {
+  font-size: 1.25rem;
+  margin: 1.5rem 0 0.75rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+.proposal-doc-preview h3 {
+  font-size: 1.1rem;
+  margin: 1.25rem 0 0.5rem;
+}
+.proposal-doc-preview h4 {
+  font-size: 1.02rem;
+  margin: 1rem 0 0.4rem;
+}
+.proposal-doc-preview h5,
+.proposal-doc-preview h6 {
+  font-size: 1rem;
+  margin: 0.85rem 0 0.35rem;
+  font-style: italic;
+}
+.proposal-doc-preview p {
+  margin: 0 0 0.85rem;
+  text-align: justify;
+}
+.proposal-doc-preview ul,
+.proposal-doc-preview ol {
+  margin: 0 0 0.85rem;
+  padding-left: 1.5rem;
+}
+.proposal-doc-preview li {
+  margin-bottom: 0.35rem;
+}
+.proposal-doc-preview strong {
+  font-weight: 700;
+}

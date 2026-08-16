@@ -122,6 +122,59 @@ export function getChapterSpecFragment(spec: StructuredProposalSpec | null, chap
   return lines.join('\n');
 }
 
+/** Flat list of every section number the spec requires for a chapter (including fixed subsections), used to verify a generation actually covered everything before it's marked complete. */
+export function getChapterSectionNumbers(spec: StructuredProposalSpec | null, chapterKey: string): string[] {
+  if (!spec?.chapters?.length) return [];
+  const chapter = spec.chapters.find((c) => c.key === chapterKey || normalizeChapterKey(c) === chapterKey);
+  if (!chapter) return [];
+  return flattenSections(chapter.sections || [])
+    .map((section) => section.number)
+    .filter((number): number is string => Boolean(number));
+}
+
+/**
+ * Guidance fragment for exactly the given section numbers within a
+ * chapter — used to ask the model to fill in only what's missing from an
+ * already-drafted chapter, instead of re-prompting with the entire chapter
+ * spec (and re-generating everything from scratch) every retry.
+ */
+export function getMissingSectionsGuidance(spec: StructuredProposalSpec | null, chapterKey: string, missingNumbers: string[]): string {
+  if (!spec?.chapters?.length || !missingNumbers.length) return '';
+  const chapter = spec.chapters.find((c) => c.key === chapterKey || normalizeChapterKey(c) === chapterKey);
+  if (!chapter) return '';
+
+  const wanted = new Set(missingNumbers);
+  const sections = flattenSections(chapter.sections || []).filter((section) => section.number && wanted.has(section.number));
+  if (!sections.length) return `Missing sections to add: ${missingNumbers.join(', ')}.`;
+
+  const lines = ['Missing section details (write exactly these, nothing else):'];
+  for (const section of sections) {
+    const guidanceText = section.guidance || section.description || '';
+    const guidancePart = guidanceText ? `: ${guidanceText}` : '';
+    lines.push(`- ${section.number} ${section.title}${guidancePart}`);
+  }
+  return lines.join('\n');
+}
+
+function sectionNumberAppears(text: string, number: string): boolean {
+  const escaped = number.replace(/\./g, '\\.');
+  const regex = new RegExp(`(?<![\\d.])${escaped}(?![\\d.])`);
+  return regex.test(text);
+}
+
+/**
+ * Verification checklist item from idea.md Section 4/5: every section number
+ * listed in the spec for this chapter must produce an actual content block.
+ * If the model only wrote the first section and stopped, that's a failed
+ * generation, not a "done" one.
+ */
+export function verifyChapterCompleteness(contentMd: string, sectionNumbers: string[]): { complete: boolean; missing: string[] } {
+  const text = String(contentMd || '');
+  if (!sectionNumbers.length) return { complete: true, missing: [] };
+  const missing = sectionNumbers.filter((number) => !sectionNumberAppears(text, number));
+  return { complete: missing.length === 0, missing };
+}
+
 export function getFrontOrBackMatterFragment(
   spec: StructuredProposalSpec | null,
   key: string

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ChevronRight, FilePlus2, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { ChevronRight, FilePlus2, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { supabase } from "@/utils/supabaseClient";
 import { useRouter } from "next/navigation";
 import { showToast } from "@/utils/toast";
@@ -26,6 +26,8 @@ export default function ProposalsPage() {
   const [title, setTitle] = useState("");
   const [department, setDepartment] = useState("");
   const [workflowMode, setWorkflowMode] = useState<"chat_to_work" | "classic">("chat_to_work");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     void loadProjects();
@@ -114,6 +116,38 @@ export default function ProposalsPage() {
     }
   };
 
+  const deleteProject = async (projectId: string) => {
+    setDeletingId(projectId);
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
+    if (!token) {
+      showToast("error", "Not authenticated");
+      setDeletingId(null);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/proposals/${projectId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const json = await res.json();
+        showToast("error", json.error || "Could not delete proposal");
+        return;
+      }
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      setConfirmDeleteId(null);
+      showToast("success", "Proposal deleted");
+    } catch {
+      showToast("error", "Could not delete proposal");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const projectToDelete = projects.find((p) => p.id === confirmDeleteId);
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 py-6 md:py-2">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -128,7 +162,7 @@ export default function ProposalsPage() {
             Project proposals
           </h1>
           <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400 sm:max-w-xl">
-            Start with only a project title, then let AI guide the proposal chapter-by-chapter using the admin-uploaded school specs.
+            Start with only a project title, then let AI guide the proposal chapter-by-chapter.
           </p>
           <p className="mt-2 text-xs font-medium text-sky-700 dark:text-sky-400">
             AI drafts cost 3 credits each.
@@ -175,42 +209,46 @@ export default function ProposalsPage() {
           ) : projects.length === 0 ? (
             <div className="mt-6 rounded-xl border border-dashed border-gray-300 px-4 py-10 text-center dark:border-gray-700">
               <p className="text-sm text-gray-600 dark:text-gray-400">No proposals yet.</p>
-              <button
-                type="button"
-                onClick={openCreate}
-                className="mt-4 inline-flex items-center gap-2 rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
-              >
-                <Plus size={16} />
-                Create your first proposal
-              </button>
             </div>
           ) : (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               {projects.map((project) => (
-                <button
-                  key={project.id}
-                  type="button"
-                  onClick={() => router.push(`/workspace/proposals/${project.id}`)}
-                  className="rounded-xl border border-gray-200 p-4 text-left transition hover:border-sky-300 hover:bg-sky-50/50 dark:border-gray-800 dark:hover:border-sky-700 dark:hover:bg-sky-950/30"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold text-gray-900 dark:text-white">{project.title}</div>
-                      <div className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
-                        {project.department || "Department not set"}
+                <div key={project.id} className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/workspace/proposals/${project.id}`)}
+                    className="w-full text-left transition hover:opacity-80"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-semibold text-gray-900 dark:text-white">{project.title}</div>
+                        <div className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
+                          {project.department || "Department not set"}
+                        </div>
                       </div>
+                      <ChevronRight size={18} className="mt-0.5 shrink-0 text-gray-400" />
                     </div>
-                    <ChevronRight size={18} className="mt-0.5 shrink-0 text-gray-400" />
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                    <span className="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-800">
-                      {project.metadata?.stage === "full_project" ? "Full project" : "Initial proposal"}
-                    </span>
-                    <span className="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-800">
-                      {project.status || "draft"}
-                    </span>
-                  </div>
-                </button>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-800">
+                        {project.metadata?.stage === "full_project" ? "Full project" : "Initial proposal"}
+                      </span>
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-800">
+                        {project.status || "draft"}
+                      </span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDeleteId(project.id);
+                    }}
+                    className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-500 dark:hover:text-red-400"
+                  >
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -304,6 +342,37 @@ export default function ProposalsPage() {
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {confirmDeleteId ? (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => !deletingId && setConfirmDeleteId(null)} aria-hidden="true" />
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Delete proposal?</h2>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+              This will permanently delete <span className="font-semibold">{projectToDelete?.title}</span> and all its content. This action cannot be undone.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                disabled={!!deletingId}
+                onClick={() => setConfirmDeleteId(null)}
+                className="min-w-0 flex-1 rounded-full border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!!deletingId}
+                onClick={() => deleteProject(confirmDeleteId)}
+                className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {deletingId === confirmDeleteId ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                {deletingId === confirmDeleteId ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

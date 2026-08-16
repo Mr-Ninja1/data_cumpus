@@ -590,7 +590,7 @@ export default function PeopleHub() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDetailTab("profile")}
+                  onClick={() => router.push(`/u/${activePerson.id}`)}
                   className="flex min-w-0 flex-1 items-center gap-2 text-left sm:gap-3"
                 >
                   <AvatarBubble

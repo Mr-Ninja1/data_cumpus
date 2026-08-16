@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -10,14 +10,18 @@ import {
   Menu,
   Paperclip,
   Send,
+  Square,
   X,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import ProposalCoverPagePreview, { type CoverPagePreviewProps } from "@/components/ProposalCoverPagePreview";
+import { renderMarkdownToHtml, type RenderedDiagramLookup } from "@/utils/markdownToHtml";
+import { formatIeeeReference } from "@/utils/ieeeReferences";
 
 type StatusTone = "pending" | "generating" | "awaiting_input" | "complete" | "failed";
 type AttachmentInfo = { path?: string; name?: string };
-type ChapterLike = { chapter_key: string; title?: string; content_md?: string };
+type ChapterLike = { chapter_key: string; title?: string; content_md?: string; incomplete?: boolean; missing_sections?: string[] };
 type ReferenceLike = {
   id?: string;
   title?: string;
@@ -30,7 +34,12 @@ type ReferenceLike = {
 type ProposalLike = {
   title?: string;
   department?: string | null;
-  metadata?: { references?: ReferenceLike[]; title_refined?: boolean; original_title?: string | null } | null;
+  metadata?: {
+    references?: ReferenceLike[];
+    title_refined?: boolean;
+    original_title?: string | null;
+    diagrams?: Record<string, { pngBase64?: string; width?: number; height?: number }>;
+  } | null;
 };
 type MessageKind = "chat" | "status" | "milestone_full_project" | "clarification";
 type WorkspaceMessage = {
@@ -59,6 +68,8 @@ type WorkspaceShellProps = {
   onFileSelect: (event?: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenFilePicker: () => void;
   onSaveReferences: () => void;
+  onSaveChapterContent?: (chapterKey: string, contentMd: string) => Promise<void>;
+  onSaveCoverField?: (field: string, value: string) => Promise<void>;
   onSaveProject: () => void;
   onExport: () => void;
   onRevertTitle?: () => void;
@@ -74,6 +85,8 @@ type WorkspaceShellProps = {
   saving: boolean;
   exporting: boolean;
   busy: boolean;
+  workingLabel?: string | null;
+  onStop?: () => void;
   fileRef: React.RefObject<HTMLInputElement | null>;
   getStatus: (chapterKey: string) => StatusTone;
   getChapterLabel: (chapterKey: string) => string;
@@ -84,6 +97,10 @@ type WorkspaceShellProps = {
   previewChapterKey: string;
   onOpenPreview: (key: string) => void;
   onClosePreview: () => void;
+  autopilotEnabled?: boolean;
+  autopilotStatus?: string;
+  togglingAutopilot?: boolean;
+  onToggleAutopilot?: () => void;
 };
 
 const STATUS_META: Record<StatusTone, { label: string; className: string }> = {
@@ -185,6 +202,7 @@ function DraftComposer({
   onFileSelect,
   onOpenFilePicker,
   onSend,
+  onStop,
   creditBalance,
   creditsCost,
   onTopUp,
@@ -198,6 +216,7 @@ function DraftComposer({
   onFileSelect: (event?: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenFilePicker: () => void;
   onSend: () => void;
+  onStop?: () => void;
   creditBalance?: number | null;
   creditsCost?: number;
   onTopUp?: () => void;
@@ -249,12 +268,14 @@ function DraftComposer({
         ) : (
           <button
             type="button"
-            onClick={onSend}
-            disabled={busy}
-            className="inline-flex shrink-0 items-center gap-2 rounded-full bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            onClick={busy ? onStop : onSend}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-white ${
+              busy ? "bg-rose-600" : "bg-sky-600"
+            }`}
+            aria-label={busy ? "Stop" : "Send"}
           >
-            {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-            {busy ? "Working…" : hasText ? "Send" : "Continue"}
+            {busy ? <Square size={14} className="fill-current" /> : <Send size={16} />}
+            {busy ? "Stop" : hasText ? "Send" : "Continue"}
           </button>
         )}
       </div>
@@ -266,6 +287,157 @@ function DraftComposer({
       <p className="mt-2 text-[11px] text-slate-400">
         Uses {cost} credits per generation · Enter to send, Shift+Enter for a new line
       </p>
+    </div>
+  );
+}
+
+const CHAPTER_NUMBER_WORDS = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX'];
+
+function chapterTocLabel(chapterKey: string, title: string): string {
+  const match = chapterKey.match(/chapter_(\d+)/);
+  if (!match) return (title || chapterKey).toUpperCase();
+  const idx = parseInt(match[1], 10) - 1;
+  const word = CHAPTER_NUMBER_WORDS[idx] ?? match[1];
+  
+  // If title is generic "Chapter X" or empty, don't duplicate — just use the chapter number.
+  // Otherwise, append the actual chapter title (e.g., "Introduction", "Literature Review").
+  const isGenericTitle = !title || title.toLowerCase() === `chapter ${match[1]}`;
+  const suffix = isGenericTitle ? '' : `: ${title.toUpperCase()}`;
+  return `CHAPTER ${word}${suffix}`;
+}
+
+/** Returns 1 for "1.1", 2 for "1.1.1", 3 for "1.1.1.1", etc. */
+function headingSubDepth(number?: string): number {
+  if (!number) return 1;
+  return (number.match(/\./g) ?? []).length;
+}
+
+/** Extracts numbered and markdown headings from a chapter's markdown content. */
+function extractTocHeadings(contentMd: string): Array<{ number?: string; text: string }> {
+  const lines = String(contentMd || "").split(/\r?\n/);
+  const headings: Array<{ number?: string; text: string }> = [];
+  const seen = new Set<string>();
+  const numberedPattern = /^(\d+(?:\.\d+){1,3})\s+(.{2,80})$/;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const mdHeading = line.match(/^#{2,4}\s+(.+)$/);
+    if (mdHeading) {
+      const text = mdHeading[1].replace(/\*\*/g, "").trim();
+      if (text && !seen.has(text)) { seen.add(text); headings.push({ text }); }
+      continue;
+    }
+
+    const boldNumbered = line.match(/^\*\*(\d+(?:\.\d+){1,3})\s+([^*]+)\*\*$/);
+    if (boldNumbered) {
+      const text = boldNumbered[2].trim();
+      if (text && !seen.has(text)) { seen.add(text); headings.push({ number: boldNumbered[1], text }); }
+      continue;
+    }
+
+    const plainNumbered = line.match(numberedPattern);
+    if (plainNumbered && line.length < 100) {
+      const text = plainNumbered[2].trim();
+      if (text && !seen.has(text)) { seen.add(text); headings.push({ number: plainNumbered[1], text }); }
+    }
+  }
+  return headings.slice(0, 20);
+}
+
+function TocPreview({ chapterStore }: { chapterStore: ChapterLike[] }) {
+  // Only show drafted chapters (not cover page or TOC itself)
+  const drafted = chapterStore.filter(
+    (c) =>
+      c.chapter_key !== "table_of_contents" &&
+      c.chapter_key !== "cover_page" &&
+      c.content_md?.trim()
+  );
+  
+  // Filter out generic "Chapter X: Chapter X" or "Chapter X: Introduction" style headings
+  // that look like duplicate chapter labels, since we'll display them as the chapter title above
+  const shouldSkipHeading = (heading: { number?: string; text: string }, chapterKey: string): boolean => {
+    const chapterNum = chapterKey.match(/chapter_(\d+)/);
+    if (!chapterNum) return false;
+    const num = chapterNum[1];
+    const text = heading.text.toLowerCase();
+    // Skip if it's "Chapter X", "Chapter X: Introduction", etc.
+    return text.startsWith(`chapter ${num}`) || text === 'chapter' || text === `introduction` && num === '1';
+  };
+
+  if (!drafted.length) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">
+          The Table of Contents is auto-built from your chapter headings. It will appear here as you complete each chapter.
+        </p>
+        <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
+          No chapters drafted yet — start with Chapter 1.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-500">
+        Live preview — updates as chapters are completed. Final version auto-generates on export.
+      </p>
+      <div
+        className="rounded-xl border border-slate-200 bg-white p-5"
+        style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '12pt' }}
+      >
+        <p className="mb-4 text-center text-base font-bold uppercase tracking-wide text-slate-900">
+          Table of Contents
+        </p>
+        <div className="space-y-3">
+          {drafted.map((chapter) => {
+            const label = chapterTocLabel(chapter.chapter_key, chapter.title || "");
+            const headings = extractTocHeadings(chapter.content_md || "");
+            return (
+              <div key={chapter.chapter_key}>
+                {/* Chapter title — ALL CAPS, bold, blue like Word heading hyperlink */}
+                <div className="flex items-center gap-2">
+                  <div className="font-bold text-blue-700 underline" style={{ fontSize: '11pt' }}>
+                    {label}
+                  </div>
+                  {chapter.incomplete ? (
+                    <span
+                      className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800"
+                      title={chapter.missing_sections?.length ? `Missing: ${chapter.missing_sections.join(', ')}` : 'Not fully drafted yet'}
+                    >
+                      Incomplete
+                    </span>
+                  ) : null}
+                </div>
+                {/* Section headings */}
+                {headings
+                  .filter((h) => !shouldSkipHeading(h, chapter.chapter_key))
+                  .map((h, hi) => {
+                    const depth = headingSubDepth(h.number);
+                    const indentClass = depth === 1 ? "pl-5" : depth === 2 ? "pl-10" : "pl-14";
+                    // depth 1 (x.x) → blue underline; depth 2+ (x.x.x / x.x.x.x) → gray, no underline
+                    const colorClass = depth === 1 ? "text-blue-600 underline" : "text-slate-700";
+                    return (
+                      <div
+                        key={hi}
+                      className={`${indentClass} ${colorClass}`}
+                      style={{ fontSize: '10.5pt' }}
+                    >
+                      {h.number ? `${h.number} ` : ""}{h.text}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+          {/* References always at the end */}
+          <div className="font-bold text-blue-700 underline" style={{ fontSize: '11pt' }}>
+            REFERENCES
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -285,11 +457,72 @@ function PreviewDrawer(props: {
   referenceInput: string;
   setReferenceInput: (value: string) => void;
   onSaveReferences: () => void;
+  onSaveChapterContent?: (chapterKey: string, contentMd: string) => Promise<void>;
+  onSaveCoverField?: (field: string, value: string) => Promise<void>;
+  diagrams?: RenderedDiagramLookup;
 }) {
+  const [editingChapter, setEditingChapter] = useState(false);
+  const [draftContent, setDraftContent] = useState("");
+  const [savingChapter, setSavingChapter] = useState(false);
+  const [editingCover, setEditingCover] = useState(false);
+  const [coverDraft, setCoverDraft] = useState({ title: "", program: "", supervisor: "", year: "" });
+  const [savingCover, setSavingCover] = useState(false);
+
+  useEffect(() => {
+    setEditingChapter(false);
+    setEditingCover(false);
+  }, [props.activeKey, props.open]);
+
   if (!props.open) return null;
   const activeChapter = props.chapterStore.find((chapter) => chapter.chapter_key === props.activeKey);
   const isCover = ["cover", "cover_page"].includes(props.activeKey);
   const isReferences = props.activeKey === "references";
+  const isToc = props.activeKey === "table_of_contents";
+
+  const startEditingChapter = () => {
+    setDraftContent(activeChapter?.content_md || "");
+    setEditingChapter(true);
+  };
+  const cancelEditingChapter = () => setEditingChapter(false);
+  const saveEditingChapter = async () => {
+    if (!props.onSaveChapterContent) return;
+    setSavingChapter(true);
+    try {
+      await props.onSaveChapterContent(props.activeKey, draftContent);
+      setEditingChapter(false);
+    } finally {
+      setSavingChapter(false);
+    }
+  };
+
+  const startEditingCover = () => {
+    setCoverDraft({
+      title: props.coverPageData?.title || "",
+      program: props.coverPageData?.program || "",
+      supervisor: props.coverPageData?.supervisor || "",
+      year: props.coverPageData?.year || "",
+    });
+    setEditingCover(true);
+  };
+  const cancelEditingCover = () => setEditingCover(false);
+  const saveEditingCover = async () => {
+    if (!props.onSaveCoverField) return;
+    setSavingCover(true);
+    try {
+      const fieldMap: Array<[string, string]> = [
+        ["title", coverDraft.title],
+        ["department", coverDraft.program],
+        ["supervisor", coverDraft.supervisor],
+        ["academic_year", coverDraft.year],
+      ];
+      for (const [field, value] of fieldMap) {
+        await props.onSaveCoverField(field, value);
+      }
+      setEditingCover(false);
+    } finally {
+      setSavingCover(false);
+    }
+  };
 
   return (
     <>
@@ -322,9 +555,100 @@ function PreviewDrawer(props: {
             </button>
           ))}
         </div>
+        {(isCover && props.coverPageData && props.onSaveCoverField) ||
+        (!isCover && !isToc && !isReferences && props.onSaveChapterContent) ? (
+          <div className="flex items-center justify-end gap-2 border-b border-slate-200 px-4 py-2">
+            {isCover ? (
+              editingCover ? (
+                <>
+                  <button type="button" onClick={cancelEditingCover} className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700">
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveEditingCover}
+                    disabled={savingCover}
+                    className="rounded-full bg-sky-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60"
+                  >
+                    {savingCover ? "Saving…" : "Save"}
+                  </button>
+                </>
+              ) : (
+                <button type="button" onClick={startEditingCover} className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700">
+                  Edit cover page
+                </button>
+              )
+            ) : editingChapter ? (
+              <>
+                <button type="button" onClick={cancelEditingChapter} className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveEditingChapter}
+                  disabled={savingChapter}
+                  className="rounded-full bg-sky-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60"
+                >
+                  {savingChapter ? "Saving…" : "Save"}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={startEditingChapter}
+                disabled={!activeChapter?.content_md}
+                className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 disabled:opacity-40"
+              >
+                Edit text
+              </button>
+            )}
+          </div>
+        ) : null}
         <div className="flex-1 overflow-y-auto p-4">
           {isCover && props.coverPageData ? (
-            <ProposalCoverPagePreview {...props.coverPageData} extraNotes={activeChapter?.content_md || ""} />
+            editingCover ? (
+              <div className="space-y-3">
+                <label className="block text-xs font-medium text-slate-600">
+                  Title
+                  <input
+                    value={coverDraft.title}
+                    onChange={(e) => setCoverDraft((d) => ({ ...d, title: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Program / Department
+                  <input
+                    value={coverDraft.program}
+                    onChange={(e) => setCoverDraft((d) => ({ ...d, program: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Supervisor
+                  <input
+                    value={coverDraft.supervisor}
+                    onChange={(e) => setCoverDraft((d) => ({ ...d, supervisor: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Academic year
+                  <input
+                    value={coverDraft.year}
+                    onChange={(e) => setCoverDraft((d) => ({ ...d, year: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                  />
+                </label>
+                <p className="text-xs text-slate-500">
+                  Student name and student ID come from your profile, not this project — update them there if needed.
+                </p>
+              </div>
+            ) : (
+              <ProposalCoverPagePreview {...props.coverPageData} extraNotes={activeChapter?.content_md || ""} />
+            )
+          ) : isToc ? (
+            <TocPreview chapterStore={props.chapterStore} />
           ) : isReferences ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -349,10 +673,7 @@ function PreviewDrawer(props: {
                 {props.references.length ? (
                   props.references.map((ref, index) => (
                     <div key={ref.id || index} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                      <div className="text-sm font-medium text-slate-800">{ref.title || ref.url || "Reference"}</div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {[ref.author, ref.year, ref.journal || ref.publisher].filter(Boolean).join(" · ") || "Reference"}
-                      </div>
+                      <div className="text-sm text-slate-800">{formatIeeeReference(ref, index)}</div>
                     </div>
                   ))
                 ) : (
@@ -378,8 +699,19 @@ function PreviewDrawer(props: {
                 </button>
               </div>
             </div>
+          ) : editingChapter ? (
+            <textarea
+              value={draftContent}
+              onChange={(e) => setDraftContent(e.target.value)}
+              rows={20}
+              className="w-full rounded-xl border border-slate-200 p-3 font-mono text-sm leading-relaxed text-slate-800"
+            />
           ) : activeChapter?.content_md ? (
-            <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{activeChapter.content_md}</div>
+            <div
+              className="proposal-doc-preview text-sm leading-relaxed text-slate-800"
+              style={{ fontFamily: '"Times New Roman", Times, serif' }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(activeChapter.content_md, props.diagrams) }}
+            />
           ) : (
             <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
               Not drafted yet. Ask AI to continue in the chat to generate this section.
@@ -495,7 +827,7 @@ export default function ProposalWorkspaceShell(props: WorkspaceShellProps) {
           <div className="flex justify-start">
             <div className="inline-flex items-center gap-2 rounded-2xl bg-slate-100 px-3.5 py-2.5 text-sm text-slate-700">
               <Loader2 size={14} className="animate-spin" />
-              Drafting {props.getChapterLabel(props.currentChapter)}…
+              {props.workingLabel || `Drafting ${props.getChapterLabel(props.currentChapter)}…`}
             </div>
           </div>
         ) : null}
@@ -511,6 +843,7 @@ export default function ProposalWorkspaceShell(props: WorkspaceShellProps) {
         onFileSelect={props.onFileSelect}
         onOpenFilePicker={props.onOpenFilePicker}
         onSend={props.onSend}
+        onStop={props.onStop}
         creditBalance={props.creditBalance}
         creditsCost={props.creditsCost ?? 3}
         onTopUp={props.onTopUp}
@@ -567,13 +900,39 @@ export default function ProposalWorkspaceShell(props: WorkspaceShellProps) {
             </button>
             <button
               type="button"
-              onClick={props.onExport}
+              onClick={() => props.onExport()}
               disabled={props.exporting}
               className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
               {props.exporting ? <Loader2 size={14} className="animate-spin" /> : <FileText size={15} />}
               <span className="hidden sm:inline">{props.exporting ? "Preparing…" : "Export"}</span>
             </button>
+            {props.onToggleAutopilot ? (
+              <button
+                type="button"
+                onClick={props.onToggleAutopilot}
+                disabled={props.togglingAutopilot}
+                title={
+                  props.autopilotEnabled
+                    ? "Autopilot is drafting this proposal in the background — click to stop"
+                    : "Let the assistant keep drafting every remaining chapter on its own, even if you close this tab"
+                }
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-sm font-semibold disabled:opacity-60 ${
+                  props.autopilotEnabled
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                    : "border-slate-300 text-slate-700"
+                }`}
+              >
+                {props.togglingAutopilot ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Zap size={15} className={props.autopilotEnabled ? "fill-emerald-500" : undefined} />
+                )}
+                <span className="hidden sm:inline">
+                  {props.autopilotEnabled ? `Autopilot: ${props.autopilotStatus || "running"}` : "Autopilot"}
+                </span>
+              </button>
+            ) : null}
           </div>
         </div>
       </header>
@@ -627,6 +986,13 @@ export default function ProposalWorkspaceShell(props: WorkspaceShellProps) {
         referenceInput={props.referenceInput}
         setReferenceInput={props.setReferenceInput}
         onSaveReferences={props.onSaveReferences}
+        onSaveChapterContent={props.onSaveChapterContent}
+        onSaveCoverField={props.onSaveCoverField}
+        diagrams={Object.fromEntries(
+          Object.entries(props.project.metadata?.diagrams || {})
+            .filter(([, value]) => value?.pngBase64)
+            .map(([key, value]) => [key, { pngBase64: value.pngBase64 as string, width: value.width || 500, height: value.height || 300 }])
+        )}
       />
     </div>
   );

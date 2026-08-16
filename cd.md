@@ -1,26 +1,105 @@
-This is the same feature we already scoped (Sections 12–13 from earlier), so let me just pull it together into one clean end-to-end flow you can hand to your coding agent — this is genuinely the right thing to nail, and title-only-input is a good bar to hold it to.
 
-## The autopilot flow, start to finish
+## Check your diagram list against what Mermaid actually covers
 
-**Trigger:** student provides just a project title (+ maybe a one-line description).
+| Diagram type (from your spec) | Mermaid support |
+|---|---|
+| Sequence Diagram | ✅ native, excellent |
+| Class Diagram | ✅ native, excellent |
+| State Machine Diagram | ✅ native (`stateDiagram-v2`) |
+| Activity Diagram | ✅ via flowchart syntax |
+| Contextual Model | ✅ via flowchart (system + external entities as nodes) |
+| Conceptual Framework | ✅ via flowchart (central node → pillar nodes) |
+| **Use Case Model** | ❌ **not natively supported** |
 
-**Step 1 — Decompose the topic into research angles.**
-Don't search the raw title. Break it into 3-5 constituent angles (the way we did for UniVote: e-voting adoption, multi-tenant SaaS patterns, auth/fraud prevention, etc.). This is what separates a shallow single-search result from something that actually looks researched.
+Use Case diagrams (actors as stick figures, ovals for use cases, association lines) just aren't part of Mermaid's syntax set. Don't force it — build one small custom template for this one type instead (details below). Everything else on your list maps cleanly.
 
-**Step 2 — Search each angle for real sources.**
-Web search plus, ideally, a scholarly API (Semantic Scholar, CrossRef) that returns actual paper metadata rather than general web results. Merge and de-duplicate into one candidate pool.
+## The core pipeline — same "generate image, then embed" principle you already have, Mermaid just fills the middle step
 
-**Step 3 — Quality-check before committing.**
-Run a relevance/credibility pass on what came back — is it actually on-topic, from a credible venue, reasonably current. This is the gate that decides what happens next.
+```
+LLM generates Mermaid syntax (text)
+   → validate syntax
+   → render server-side to PNG/SVG
+   → embed as a normal image in the docx
+```
 
-**Step 4a — If strong:** store the sources in `references.json`, tagged `source: "ai_sourced"`. Proceed straight to synthesis (Step 5) — this is the "student did nothing and it just worked" path.
+The model never touches pixels — it writes something like:
 
-**Step 4b — If thin:** don't pad it with weak sources to hit a count. Tell the student specifically — *"only found 2 directly relevant sources, might not be enough — try searching [related angle] or your library's database for [source type]"* — and let them either proceed with what's there or go find more. This is the moment that actually builds trust: the system is honest about its own research quality instead of quietly covering the gap.
+```
+sequenceDiagram
+    participant Student
+    participant System
+    participant WebAuthn
+    Student->>System: Initiate login
+    System->>WebAuthn: Request roaming credential
+    WebAuthn-->>System: Return signed assertion
+    System-->>Student: Grant session
+```
 
-**Step 5 — Synthesize the Literature Review from that store.**
-Cluster by theme, one subsection per cluster titled the way your school's real convention shows it (`2.3.3 [Theme] — Author (Year)`), close with an explicit gap statement that feeds into Chapter 1's Significance section. Generation is constrained to cite *only* what's in `references.json` — nothing else, ever.
+This is far more reliable than asking for SVG/drawing coordinates directly, because Mermaid's syntax is small, constrained, and — critically — **validatable before rendering**, which gives you a clean retry loop instead of a silently broken diagram.
 
-**Step 6 — The References page is not AI-written at all.**
-This is worth being precise about, because it's actually a nice architectural unification: the References page should be **deterministically rendered from `references.json`**, the exact same way the cover page is deterministically rendered from `school_profile` — sort/format according to the citation style, done in code, not generated text. Two pages in the document (cover page, references page) are pure data-rendering, zero AI, which also means they can never be wrong in a way that traces back to model behavior. Everything cited *inside* the chapters just has to match an entry in that same store — which your Section 12 validation check already verifies.
+## Rendering, server-side, for Next.js
 
-That's the whole loop: title in → real sources found or the student's told exactly where to look → chapters and references page both draw from one verified store → nothing in the output traces back to something invented. That consistency is what actually makes it feel like autopilot rather than a slot machine — the student can trust that if a name's in their references page, it's real, because the system was never allowed to put it there otherwise.
+Client-side mermaid.js (the library you'd use for live preview in a browser) isn't the right tool for producing a file to embed in a docx generated on your backend. Use `@mermaid-js/mermaid-cli` (the `mmdc` command), which runs headless Chrome under the hood and converts a `.mmd` file straight to PNG/SVG — this runs fine as a step in a Node/Next.js API route or background job:
+
+```bash
+npx mmdc -i diagram.mmd -o diagram.png -b transparent -w 1200
+```
+
+Call it as a subprocess from your generation job. If you'd rather avoid managing headless Chrome yourself, a self-hosted Kroki instance does the same job over HTTP and is simpler to keep running in a container — either is fine, pick based on how much infra you want to own.
+
+## Validate before rendering, and retry with the error fed back
+
+```
+1. LLM generates Mermaid syntax
+2. Run it through mermaid's own parser/lint step (available via the
+   mermaid npm package's parse function) BEFORE attempting a full render
+3. If invalid → retry the generation call once, appending the actual
+   parser error to the prompt ("your last diagram failed to parse: <error>.
+   Fix and regenerate.")
+4. If still invalid after one retry → fall back to the unsupported_reframe
+   behavior from before: tell the user the diagram couldn't be generated
+   reliably, don't silently embed something broken or skip it without
+   saying so
+```
+
+This mirrors the exact JSON-validation-retry pattern already in place for the spec extraction — same discipline, different artifact type.
+
+## Styling — tie it to your existing `style_spec.json`, don't hardcode diagram colors separately
+
+Mermaid supports a `themeVariables` config block — primary color, font, line color, etc. Feed it from the same brand config used everywhere else, so diagrams visually match the rest of the document and the "change theme color to green" edit command (from way earlier) automatically applies here too, with zero extra work:
+
+```js
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#1a3c6e',
+  'primaryTextColor': '#000',
+  'lineColor': '#1a3c6e',
+  'fontFamily': 'Calibri'
+}}}%%
+```
+
+## The Use Case diagram gap — small custom template, not Mermaid
+
+Use case diagrams are actually formulaic content-wise (a list of actors, a list of use cases, association lines between them) — perfect for a simple generated SVG template rather than reaching for a heavier tool like PlantUML just for this one type. Have the LLM output structured data instead of drawing syntax:
+
+```json
+{ "actors": ["Student", "Admin"], "use_cases": ["Cast Vote", "View Results", "Manage Election"],
+  "associations": [["Student", "Cast Vote"], ["Student", "View Results"], ["Admin", "Manage Election"]] }
+```
+
+Then a small deterministic SVG-builder function (same pattern as the fish/pliers/rectangle diagrams built earlier in this conversation) lays out actors as simple stick figures, use cases as ovals, and draws the association lines. Fully code-driven, no rendering-reliability risk at all — it's the diagrams-as-structured-data-then-code-drawn approach, just applied to this one specific gap.
+
+## Registry structure — add this to your spec so every diagram type declares its own method
+
+```json
+"diagram_registry": {
+  "conceptual_framework": { "method": "mermaid", "mermaid_type": "flowchart" },
+  "contextual_model": { "method": "mermaid", "mermaid_type": "flowchart" },
+  "use_case_model": { "method": "custom_svg_template", "template": "use_case_diagram" },
+  "sequence_diagram": { "method": "mermaid", "mermaid_type": "sequenceDiagram" },
+  "state_machine_diagram": { "method": "mermaid", "mermaid_type": "stateDiagram-v2" },
+  "activity_diagram": { "method": "mermaid", "mermaid_type": "flowchart" },
+  "class_diagram": { "method": "mermaid", "mermaid_type": "classDiagram" }
+}
+```
+
+`generate_diagram(diagram_key)` looks up the method here first, then branches to either the Mermaid pipeline or the custom-SVG path — one function, two backends, easy to add a third method later if some future diagram type needs it. And this plugs straight into the `regenerate_diagram(diagram_key, instruction)` tool from the intent-classifier work — same tool, same routing, it just now has a real implementation underneath instead of a stub.
